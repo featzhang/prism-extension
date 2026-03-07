@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRism</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <svg class="logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="4" fill="#0969da"/>
+        <text x="12" y="17" text-anchor="middle" fill="white" font-size="14" font-weight="bold" font-family="Arial">F</text>
+      </svg>
+      <span id="repo-name" class="repo-name">PRism</span>
+    </div>
+    <div class="header-right">
+      <span id="auth-user" class="auth-user" style="display:none"></span>
+      <button id="btn-login" class="login-btn">Login</button>
+      <button id="btn-logout" class="icon-btn" title="Logout" style="display:none">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2.75C2 1.784 2.784 1 3.75 1h2.5a.75.75 0 0 1 0 1.5h-2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h2.5a.75.75 0 0 1 0 1.5h-2.5A1.75 1.75 0 0 1 2 13.25Zm10.44 4.5-1.97-1.97a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .744.215l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l1.97-1.97H6.75a.75.75 0 0 1 0-1.5Z"/></svg>
+      </button>
+      <button id="btn-refresh" class="icon-btn" title="Refresh">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+      </button>
+      <button id="btn-settings" class="icon-btn" title="Settings">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Dashboard -->
+  <section class="dashboard">
+    <div class="stat-card" id="stat-open">
+      <span class="stat-number" id="num-open">—</span>
+      <span class="stat-label">Open</span>
+    </div>
+    <div class="stat-card" id="stat-closed">
+      <span class="stat-number" id="num-closed">—</span>
+      <span class="stat-label">Closed</span>
+    </div>
+    <div class="stat-card" id="stat-merged">
+      <span class="stat-number" id="num-merged">—</span>
+      <span class="stat-label">Merged</span>
+    </div>
+    <div class="stat-card" id="stat-total">
+      <span class="stat-number" id="num-total">—</span>
+      <span class="stat-label">Total</span>
+    </div>
+  </section>
+
+  <!-- Filter bar -->
+  <section class="filter-bar">
+    <div class="sort-group">
+      <label for="state-select" class="sort-label">State:</label>
+      <select id="state-select" class="sort-select">
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+        <option value="all">All</option>
+      </select>
+    </div>
+    <div class="sort-group">
+      <label for="sort-select" class="sort-label">Sort:</label>
+      <select id="sort-select" class="sort-select">
+        <option value="created-desc">Newest</option>
+        <option value="created-asc">Oldest</option>
+        <option value="updated-desc">Recently updated</option>
+        <option value="updated-asc">Least updated</option>
+      </select>
+    </div>
+    <div class="sort-group author-group">
+      <label for="author-input" class="sort-label">Author:</label>
+      <input type="text" id="author-input" class="author-input" placeholder="any" spellcheck="false" autocomplete="off">
+      <button id="btn-author-clear" class="author-clear-btn" title="Clear author filter" style="display:none">✕</button>
+    </div>
+  </section>
+
+  <!-- Status bar -->
+  <div id="status-bar" class="status-bar hidden"></div>
+
+  <!-- PR List -->
+  <main class="pr-list-container" id="pr-list-container">
+    <div id="pr-list" class="pr-list">
+      <div class="loading">
+        <div class="spinner"></div>
+        <span>Loading PRs...</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Pagination -->
+  <footer class="pagination" id="pagination">
+    <button id="btn-prev" class="page-btn" disabled>← Prev</button>
+    <span id="page-info" class="page-info">Page 1</span>
+    <button id="btn-next" class="page-btn" disabled>Next →</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
