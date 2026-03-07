@@ -184,26 +184,30 @@ body {
 }
 
 #stat-open .stat-number { color: var(--color-open); }
-#stat-closed .stat-number { color: var(--color-closed); }
-#stat-merged .stat-number { color: var(--color-merged); }
-#stat-total .stat-number { color: var(--color-total); }
+#stat-done .stat-number { color: var(--color-merged); }
 
 /* ===== Filter Bar ===== */
 .filter-bar {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 36px;
-  padding: 0 12px;
+  flex-direction: column;
+  padding: 4px 12px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
   flex-shrink: 0;
+  gap: 4px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
 }
 
 .sort-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .sort-label {
@@ -223,11 +227,11 @@ body {
 }
 
 #state-select {
-  width: 70px;
+  width: 65px;
 }
 
 #sort-select {
-  width: 55px;
+  width: 140px;
 }
 
 .sort-select:focus {
@@ -261,6 +265,17 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  border-top: 1px solid transparent;
+  transition: border-color 0s;
+}
+
+.pr-list-container.loading {
+  border-top: 1px solid transparent;
+  background-image: linear-gradient(90deg, var(--color-total) 0%, #57abff 50%, var(--color-total) 100%);
+  background-size: 200% 1px;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  animation: progress-slide 1.2s linear infinite;
 }
 
 .pr-list {
@@ -480,44 +495,21 @@ body {
   font-style: italic;
 }
 
-/* ===== Author Filter Bar ===== */
-.author-group {
-  flex: 1;
-  min-width: 0;
+.cr-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #fff8c5;
+  color: var(--color-pending);
+  border: 1px solid #e3b341;
 }
 
-.author-input {
-  flex: 1;
-  padding: 2px 6px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  min-width: 0;
-}
+#stat-unresolved-cr .stat-number { color: var(--color-pending); }
 
-.author-input:focus {
-  outline: none;
-  border-color: var(--color-total);
-  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
-}
 
-.author-clear-btn {
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0 2px;
-  line-height: 1;
-}
-
-.author-clear-btn:hover {
-  color: var(--text-primary);
-}
 
 
 .pagination {

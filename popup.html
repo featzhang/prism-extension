@@ -37,43 +37,46 @@
       <span class="stat-number" id="num-open">—</span>
       <span class="stat-label">Open</span>
     </div>
-    <div class="stat-card" id="stat-closed">
-      <span class="stat-number" id="num-closed">—</span>
-      <span class="stat-label">Closed</span>
+    <div class="stat-card" id="stat-done">
+      <span class="stat-number" id="num-done">—</span>
+      <span class="stat-label">Done</span>
     </div>
-    <div class="stat-card" id="stat-merged">
-      <span class="stat-number" id="num-merged">—</span>
-      <span class="stat-label">Merged</span>
-    </div>
-    <div class="stat-card" id="stat-total">
-      <span class="stat-number" id="num-total">—</span>
-      <span class="stat-label">Total</span>
+    <div class="stat-card" id="stat-unresolved-cr">
+      <span class="stat-number" id="num-unresolved-cr">—</span>
+      <span class="stat-label">Unresolved CR</span>
     </div>
   </section>
 
   <!-- Filter bar -->
   <section class="filter-bar">
-    <div class="sort-group">
-      <label for="state-select" class="sort-label">State:</label>
-      <select id="state-select" class="sort-select">
-        <option value="open">Open</option>
-        <option value="closed">Closed</option>
-        <option value="all">All</option>
-      </select>
-    </div>
-    <div class="sort-group">
-      <label for="sort-select" class="sort-label">Sort:</label>
-      <select id="sort-select" class="sort-select">
-        <option value="created-desc">Newest</option>
-        <option value="created-asc">Oldest</option>
-        <option value="updated-desc">Recently updated</option>
-        <option value="updated-asc">Least updated</option>
-      </select>
-    </div>
-    <div class="sort-group author-group">
-      <label for="author-input" class="sort-label">Author:</label>
-      <input type="text" id="author-input" class="author-input" placeholder="any" spellcheck="false" autocomplete="off">
-      <button id="btn-author-clear" class="author-clear-btn" title="Clear author filter" style="display:none">✕</button>
+    <div class="filter-row">
+      <div class="sort-group">
+        <label for="state-select" class="sort-label">State:</label>
+        <select id="state-select" class="sort-select">
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div class="sort-group">
+        <label for="ci-filter-select" class="sort-label">CI:</label>
+        <select id="ci-filter-select" class="sort-select" style="width:55px">
+          <option value="all">All</option>
+          <option value="ci-success">Pass</option>
+          <option value="ci-failure">Fail</option>
+          <option value="ci-pending">Pending</option>
+          <option value="ci-unknown">Unknown</option>
+        </select>
+      </div>
+      <div class="sort-group">
+        <label for="sort-select" class="sort-label">Sort:</label>
+        <select id="sort-select" class="sort-select">
+          <option value="created-desc">Newest</option>
+          <option value="created-asc">Oldest</option>
+          <option value="updated-desc">Recently updated</option>
+          <option value="updated-asc">Least updated</option>
+        </select>
+      </div>
     </div>
   </section>
 

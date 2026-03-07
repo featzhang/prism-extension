@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PRism",
   "description": "Monitor Apache Flink pull requests with CI status — built for open source contributors",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "permissions": ["storage", "sidePanel", "tabs"],
   "host_permissions": ["https://api.github.com/*", "https://github.com/*"],
   "side_panel": {

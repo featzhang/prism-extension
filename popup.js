@@ -155,6 +155,64 @@ const GitHubAPI = {
     return comments;
   },
 
+  async fetchGraphQL(query, variables) {
+    if (!this._token) return null;
+    const resp = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this._token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!resp.ok) throw new Error(`GraphQL error: ${resp.status}`);
+    const data = await resp.json();
+    if (data.errors) throw new Error(data.errors[0].message);
+    return data.data;
+  },
+
+  async getUnresolvedThreadCount(owner, repo, prNumber) {
+    const cacheKey = `cache_cr_${owner}_${repo}_${prNumber}`;
+    const cached = await Storage.getCache(cacheKey);
+    if (cached !== null) return cached;
+
+    const query = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100) {
+              nodes { isResolved }
+            }
+          }
+        }
+      }`;
+    const data = await this.fetchGraphQL(query, { owner, repo, number: prNumber });
+    if (!data) return null;
+
+    const threads = data.repository.pullRequest.reviewThreads.nodes;
+    const count = threads.filter(t => !t.isResolved).length;
+    await Storage.setCache(cacheKey, count, CONFIG.TTL_COMMENTS);
+    return count;
+  },
+
+  async batchGetUnresolvedCR(owner, repo, prNumbers, onResult) {
+    const queue = [...prNumbers];
+    const workers = Array.from({ length: CONFIG.CONCURRENT }, async () => {
+      while (queue.length > 0) {
+        const prNumber = queue.shift();
+        if (prNumber === undefined) break;
+        try {
+          const count = await this.getUnresolvedThreadCount(owner, repo, prNumber);
+          onResult(prNumber, count);
+        } catch (err) {
+          console.warn(`Failed to get CR for PR #${prNumber}:`, err.message);
+          onResult(prNumber, null);
+        }
+      }
+    });
+    await Promise.all(workers);
+  },
+
   async batchGetComments(repo, prNumbers, onResult) {
     // Concurrency-limited queue
     const queue = [...prNumbers];
@@ -304,13 +362,11 @@ function renderPRTitle(title, prUrl) {
 const Renderer = {
   renderStats(stats) {
     document.getElementById('num-open').textContent = stats.open.toLocaleString();
-    document.getElementById('num-closed').textContent = stats.closed.toLocaleString();
-    document.getElementById('num-merged').textContent = stats.merged.toLocaleString();
-    document.getElementById('num-total').textContent = stats.total.toLocaleString();
+    document.getElementById('num-done').textContent = (stats.closed + stats.merged).toLocaleString();
   },
 
   renderStatsLoading() {
-    ['num-open', 'num-closed', 'num-merged', 'num-total'].forEach(id => {
+    ['num-open', 'num-done', 'num-unresolved-cr'].forEach(id => {
       document.getElementById(id).textContent = '…';
     });
   },
@@ -353,6 +409,7 @@ const Renderer = {
               ${pr.comments || 0}
             </span>
             <span id="ci-${pr.number}" class="ci-loading">loading CI…</span>
+            <span id="cr-${pr.number}"></span>
           </div>
         </div>
       `;
@@ -393,6 +450,23 @@ const Renderer = {
     }
   },
 
+  updateCRCount(prNumber, count) {
+    const el = document.getElementById(`cr-${prNumber}`);
+    if (!el) return;
+    if (count === null || count === 0) {
+      el.className = '';
+      el.textContent = '';
+      return;
+    }
+    el.className = 'cr-badge';
+    el.textContent = `${count} CR`;
+  },
+
+  renderCRStat(total) {
+    const el = document.getElementById('num-unresolved-cr');
+    if (el) el.textContent = total.toLocaleString();
+  },
+
   renderPagination(page, hasMore, totalCount) {
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / CONFIG.PER_PAGE) : (hasMore ? '?' : page);
     document.getElementById('page-info').textContent = `Page ${page} / ${totalPages}`;
@@ -419,6 +493,7 @@ const App = {
   currentSort: 'created',
   currentDirection: 'desc',
   currentAuthor: '',
+  currentCIFilter: 'all',
   currentPRs: [],
   currentTotalCount: 0,
   isLoading: false,
@@ -429,11 +504,7 @@ const App = {
     this.currentAuthor = await Storage.getUsername();
     document.getElementById('repo-name').textContent = this.repo;
 
-    const authorInput = document.getElementById('author-input');
-    authorInput.value = this.currentAuthor;
-    this.updateAuthorClearBtn();
     this.renderAuthState();
-
     this.bindEvents();
     this.watchAuthStorage();
     await this.loadAll();
@@ -479,34 +550,17 @@ const App = {
       this.loadPRs();
     });
 
-    // Author filter
-    const authorInput = document.getElementById('author-input');
-    let authorDebounce;
-    authorInput.addEventListener('input', () => {
-      clearTimeout(authorDebounce);
-      authorDebounce = setTimeout(() => {
-        this.currentAuthor = authorInput.value.trim();
-        this.updateAuthorClearBtn();
-        this.currentPage = 1;
-        this.loadStats();
-        this.loadPRs();
-      }, 400);
-    });
 
-    document.getElementById('btn-author-clear').addEventListener('click', () => {
-      authorInput.value = '';
-      this.currentAuthor = '';
-      this.updateAuthorClearBtn();
-      this.currentPage = 1;
-      this.loadStats();
-      this.loadPRs();
-    });
 
     // Stat cards click to filter
     document.getElementById('stat-open').addEventListener('click', () => this.switchTab('open'));
-    document.getElementById('stat-closed').addEventListener('click', () => this.switchTab('closed'));
-    document.getElementById('stat-merged').addEventListener('click', () => this.switchTab('merged'));
-    document.getElementById('stat-total').addEventListener('click', () => this.switchTab('all'));
+    document.getElementById('stat-done').addEventListener('click', () => this.switchTab('closed'));
+
+    // CI filter
+    document.getElementById('ci-filter-select').addEventListener('change', e => {
+      this.currentCIFilter = e.target.value;
+      this.applyCIFilter();
+    });
 
     // Login / Logout
     document.getElementById('btn-login').addEventListener('click', () => this.startLogin());
@@ -554,8 +608,6 @@ const App = {
     await Storage.clearAuth();
     GitHubAPI._token = '';
     this.currentAuthor = '';
-    document.getElementById('author-input').value = '';
-    this.updateAuthorClearBtn();
     this.renderAuthState();
     await Storage.clearCacheByPrefix('cache_');
     await this.loadAll();
@@ -569,8 +621,6 @@ const App = {
         Storage.getToken().then(token => {
           GitHubAPI._token = token;
           this.currentAuthor = msg.username;
-          document.getElementById('author-input').value = msg.username;
-          this.updateAuthorClearBtn();
           this.renderAuthState();
           Renderer.hideStatus();
           const loginBtn = document.getElementById('btn-login');
@@ -594,8 +644,6 @@ const App = {
       if (changes.gh_token || changes.username) {
         GitHubAPI._token = await Storage.getToken();
         this.currentAuthor = await Storage.getUsername();
-        document.getElementById('author-input').value = this.currentAuthor;
-        this.updateAuthorClearBtn();
         this.renderAuthState();
         Renderer.hideStatus();
         const loginBtn = document.getElementById('btn-login');
@@ -616,10 +664,21 @@ const App = {
     });
   },
 
-  updateAuthorClearBtn() {
-    const btn = document.getElementById('btn-author-clear');
-    btn.style.display = this.currentAuthor ? 'inline' : 'none';
+  applyCIFilter() {
+    const filter = this.currentCIFilter;
+    document.querySelectorAll('.pr-item').forEach(item => {
+      if (filter === 'all') {
+        item.style.display = '';
+        return;
+      }
+      // Find the ci badge element inside this item
+      const badge = item.querySelector('[id^="ci-"]');
+      const hasClass = badge && badge.classList.contains(filter);
+      item.style.display = hasClass ? '' : 'none';
+    });
   },
+
+
 
   switchTab(state) {
     document.getElementById('state-select').value = state;
@@ -653,11 +712,11 @@ const App = {
       const stats = await GitHubAPI.getStats(this.repo, this.currentAuthor);
       Renderer.renderStats(stats);
       // Update total count for current state to compute total pages
-      const stateKey = this.currentState === 'all' ? 'total'
-        : this.currentState === 'merged' ? 'merged'
-        : this.currentState === 'closed' ? 'closed'
-        : 'open';
-      this.currentTotalCount = stats[stateKey] || 0;
+      const stateCount = this.currentState === 'all' ? (stats.open + stats.closed + stats.merged)
+        : this.currentState === 'merged' ? stats.merged
+        : this.currentState === 'closed' ? stats.closed
+        : stats.open;
+      this.currentTotalCount = stateCount || 0;
       Renderer.renderPagination(this.currentPage, this.currentPage * CONFIG.PER_PAGE < this.currentTotalCount, this.currentTotalCount);
     } catch (err) {
       console.error('Failed to load stats:', err);
@@ -671,6 +730,9 @@ const App = {
     this.setLoading(true);
     Renderer.renderLoading();
     Renderer.hideStatus();
+    // Reset CI filter on new load
+    this.currentCIFilter = 'all';
+    document.getElementById('ci-filter-select').value = 'all';
 
     try {
       const prs = await GitHubAPI.getPRList(this.repo, {
@@ -685,12 +747,24 @@ const App = {
       Renderer.renderPRList(prs);
       Renderer.renderPagination(this.currentPage, prs.length >= CONFIG.PER_PAGE, this.currentTotalCount);
 
-      // Async load CI statuses
+      // Async load CI statuses and unresolved CR counts
       if (prs.length > 0) {
         const prNumbers = prs.map(pr => pr.number);
+        const [ownerName, repoName] = this.repo.split('/');
+
         GitHubAPI.batchGetComments(this.repo, prNumbers, (prNumber, ciStatus) => {
           Renderer.updateCIStatus(prNumber, ciStatus);
+          this.applyCIFilter();
         });
+
+        if (GitHubAPI._token) {
+          let totalCR = 0;
+          GitHubAPI.batchGetUnresolvedCR(ownerName, repoName, prNumbers, (prNumber, count) => {
+            Renderer.updateCRCount(prNumber, count);
+            if (count) totalCR += count;
+            Renderer.renderCRStat(totalCR);
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to load PRs:', err);
@@ -706,12 +780,15 @@ const App = {
   setLoading(loading) {
     this.isLoading = loading;
     const btn = document.getElementById('btn-refresh');
+    const container = document.getElementById('pr-list-container');
     if (loading) {
       btn.classList.add('spinning');
       btn.disabled = true;
+      container.classList.add('loading');
     } else {
       btn.classList.remove('spinning');
       btn.disabled = false;
+      container.classList.remove('loading');
     }
   },
 };
