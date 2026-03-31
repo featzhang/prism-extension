@@ -9,6 +9,17 @@ const CONFIG = {
   TTL_COMMENTS: 5 * 60 * 1000, // 5 minutes
   DEFAULT_REPO: 'apache/flink',
   GITHUB_API: 'https://api.github.com',
+  // 预设项目列表
+  PRESET_REPOS: [
+    { value: 'apache/flink', label: 'Apache Flink' },
+    { value: 'apache/flink-connector-http', label: 'Flink Connector HTTP' },
+    { value: 'apache/flink-connector-kafka', label: 'Flink Connector Kafka' },
+    { value: 'apache/flink-connector-jdbc', label: 'Flink Connector JDBC' },
+    { value: 'apache/flink-connector-elasticsearch', label: 'Flink Connector ES' },
+    { value: 'apache/flink-cdc', label: 'Flink CDC' },
+    { value: 'apache/flink-ml', label: 'Flink ML' },
+    { value: 'apache/flink-kubernetes-operator', label: 'Flink K8s Operator' },
+  ],
 };
 
 // ===== STORAGE =====
@@ -60,6 +71,14 @@ const Storage = {
     return new Promise(resolve => {
       chrome.storage.local.get('gh_token', result => {
         resolve(result.gh_token || '');
+      });
+    });
+  },
+
+  async getCustomRepos() {
+    return new Promise(resolve => {
+      chrome.storage.local.get('customRepos', result => {
+        resolve(result.customRepos || []);
       });
     });
   },
@@ -155,6 +174,45 @@ const GitHubAPI = {
     return comments;
   },
 
+  // 获取 PR 详情（包含 head sha）
+  async getPRDetail(repo, prNumber) {
+    const cacheKey = `cache_pr_detail_${repo}_${prNumber}`;
+    const cached = await Storage.getCache(cacheKey);
+    if (cached) return cached;
+
+    const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls/${prNumber}`;
+    const pr = await this.fetch(url);
+
+    await Storage.setCache(cacheKey, pr, CONFIG.TTL_PRS);
+    return pr;
+  },
+
+  // 获取 Check Runs（GitHub Actions CI 状态）
+  async getCheckRuns(repo, ref) {
+    const cacheKey = `cache_checks_${repo}_${ref}`;
+    const cached = await Storage.getCache(cacheKey);
+    if (cached) return cached;
+
+    const url = `${CONFIG.GITHUB_API}/repos/${repo}/commits/${ref}/check-runs?per_page=100`;
+    const result = await this.fetch(url);
+
+    await Storage.setCache(cacheKey, result.check_runs || [], CONFIG.TTL_COMMENTS);
+    return result.check_runs || [];
+  },
+
+  // 获取 Commit Status（传统 CI 状态）
+  async getCommitStatuses(repo, ref) {
+    const cacheKey = `cache_statuses_${repo}_${ref}`;
+    const cached = await Storage.getCache(cacheKey);
+    if (cached) return cached;
+
+    const url = `${CONFIG.GITHUB_API}/repos/${repo}/commits/${ref}/statuses?per_page=100`;
+    const statuses = await this.fetch(url);
+
+    await Storage.setCache(cacheKey, statuses, CONFIG.TTL_COMMENTS);
+    return statuses;
+  },
+
   async fetchGraphQL(query, variables) {
     if (!this._token) return null;
     const resp = await fetch('https://api.github.com/graphql', {
@@ -232,6 +290,61 @@ const GitHubAPI = {
     });
     await Promise.all(workers);
   },
+
+  // 通用的 CI 状态获取方法，根据项目类型选择不同策略
+  async batchGetCIStatus(repo, prs, onResult) {
+    // 判断项目类型：apache/flink 使用 Azure CI（flinkbot 评论），其他使用 GitHub Actions
+    const useAzureCI = repo === 'apache/flink';
+    
+    const queue = [...prs];
+    const workers = Array.from({ length: CONFIG.CONCURRENT }, async () => {
+      while (queue.length > 0) {
+        const pr = queue.shift();
+        if (pr === undefined) break;
+        const prNumber = pr.number;
+        
+        try {
+          let ciStatus = null;
+          
+          if (useAzureCI) {
+            // Apache Flink 主项目：从 flinkbot 评论获取 Azure CI 状态
+            const comments = await this.getPRComments(repo, prNumber);
+            ciStatus = CIParser.extractCIStatusFromComments(comments);
+          } else {
+            // Connector 等其他项目：从 GitHub Check Runs 获取 CI 状态
+            // 获取 head SHA（如果 PR 对象没有，则获取 PR 详情）
+            let headSha = pr.head?.sha;
+            if (!headSha) {
+              const prDetail = await this.getPRDetail(repo, prNumber);
+              headSha = prDetail?.head?.sha;
+            }
+            
+            if (headSha) {
+              // 优先尝试 Check Runs (GitHub Actions)
+              const checkRuns = await this.getCheckRuns(repo, headSha);
+              if (checkRuns && checkRuns.length > 0) {
+                ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
+              }
+              
+              // 如果没有 Check Runs，尝试 Commit Status
+              if (!ciStatus) {
+                const statuses = await this.getCommitStatuses(repo, headSha);
+                if (statuses && statuses.length > 0) {
+                  ciStatus = CIParser.parseCommitStatus(statuses);
+                }
+              }
+            }
+          }
+          
+          onResult(prNumber, ciStatus);
+        } catch (err) {
+          console.warn(`Failed to get CI for PR #${prNumber}:`, err.message);
+          onResult(prNumber, null);
+        }
+      }
+    });
+    await Promise.all(workers);
+  },
 };
 
 // ===== CI PARSER =====
@@ -239,7 +352,8 @@ const CIParser = {
   AZURE_PATTERN: /Azure:\s*\[([A-Z_]+)\]\((https?:\/\/dev\.azure\.com[^)]+)\)/gi,
   FLINKBOT_USER: 'flinkbot',
 
-  extractCIStatus(comments) {
+  // 从评论中提取 CI 状态（适用于 apache/flink 主项目）
+  extractCIStatusFromComments(comments) {
     // Filter flinkbot comments with Azure CI reports, sorted by created_at desc
     const flinkbotComments = comments
       .filter(c => c.user && c.user.login === this.FLINKBOT_USER)
@@ -250,6 +364,11 @@ const CIParser = {
 
     // Use the most recent flinkbot CI comment
     return this.parseAzureStatus(flinkbotComments[0].body);
+  },
+
+  // 兼容旧方法名
+  extractCIStatus(comments) {
+    return this.extractCIStatusFromComments(comments);
   },
 
   parseAzureStatus(body) {
@@ -269,13 +388,87 @@ const CIParser = {
       url: last.url,
       cssClass: this.statusToCssClass(last.status),
       label: this.statusToLabel(last.status),
+      source: 'azure',
     };
   },
 
+  // 从 GitHub Check Runs 解析 CI 状态（适用于 flink-connector-* 项目）
+  parseCheckRunsStatus(checkRuns) {
+    if (!checkRuns || checkRuns.length === 0) return null;
+
+    // 查找主要的 CI check（通常是 "Build" 或包含 "CI" 的）
+    const priorityKeywords = ['build', 'ci', 'test', 'check'];
+    let mainCheck = null;
+
+    // 优先查找包含关键词的 check
+    for (const keyword of priorityKeywords) {
+      mainCheck = checkRuns.find(cr => 
+        cr.name.toLowerCase().includes(keyword)
+      );
+      if (mainCheck) break;
+    }
+
+    // 如果没找到，使用第一个 check
+    if (!mainCheck) {
+      mainCheck = checkRuns[0];
+    }
+
+    // 解析状态
+    const status = this.mapCheckRunStatus(mainCheck.status, mainCheck.conclusion);
+    
+    return {
+      status: status,
+      url: mainCheck.html_url || mainCheck.details_url || '',
+      cssClass: this.statusToCssClass(status),
+      label: this.statusToLabelGitHub(status, mainCheck.name),
+      source: 'github-actions',
+      checkName: mainCheck.name,
+    };
+  },
+
+  // 从 GitHub Commit Status 解析 CI 状态
+  parseCommitStatus(statuses) {
+    if (!statuses || statuses.length === 0) return null;
+
+    // 获取最新的状态（通常是合并后的状态）
+    const latestStatus = statuses[0];
+    const status = latestStatus.state.toUpperCase();
+
+    return {
+      status: status,
+      url: latestStatus.target_url || '',
+      cssClass: this.statusToCssClass(status),
+      label: this.statusToLabelGitHub(status, latestStatus.context || 'CI'),
+      source: 'github-status',
+    };
+  },
+
+  // 映射 GitHub Check Run 状态
+  mapCheckRunStatus(status, conclusion) {
+    if (status === 'completed') {
+      switch (conclusion) {
+        case 'success': return 'SUCCESS';
+        case 'failure': return 'FAILURE';
+        case 'cancelled': return 'CANCELLED';
+        case 'skipped': return 'SKIPPED';
+        case 'timed_out': return 'TIMEOUT';
+        case 'action_required': return 'ACTION_REQUIRED';
+        case 'neutral': return 'NEUTRAL';
+        default: return 'UNKNOWN';
+      }
+    }
+    switch (status) {
+      case 'queued': return 'QUEUED';
+      case 'in_progress': return 'IN_PROGRESS';
+      case 'waiting': return 'WAITING';
+      default: return 'PENDING';
+    }
+  },
+
   statusToCssClass(status) {
-    if (['SUCCEEDED', 'SUCCESS', 'PASSED'].includes(status)) return 'ci-success';
-    if (['FAILED', 'FAILURE', 'ERROR'].includes(status)) return 'ci-failure';
-    if (['PENDING', 'RUNNING', 'IN_PROGRESS', 'INPROGRESS'].includes(status)) return 'ci-pending';
+    if (['SUCCEEDED', 'SUCCESS', 'PASSED', 'NEUTRAL'].includes(status)) return 'ci-success';
+    if (['FAILED', 'FAILURE', 'ERROR', 'TIMEOUT'].includes(status)) return 'ci-failure';
+    if (['PENDING', 'RUNNING', 'IN_PROGRESS', 'INPROGRESS', 'QUEUED', 'WAITING'].includes(status)) return 'ci-pending';
     if (['DELETED', 'CANCELED', 'CANCELLED', 'SKIPPED'].includes(status)) return 'ci-unknown';
     return 'ci-unknown';
   },
@@ -298,6 +491,24 @@ const CIParser = {
       SKIPPED: 'Azure: Skipped',
     };
     return labels[status] || `Azure: ${status}`;
+  },
+
+  statusToLabelGitHub(status, checkName) {
+    const shortName = checkName ? checkName.split('/').pop().substring(0, 12) : 'CI';
+    const labels = {
+      SUCCESS: `✓ ${shortName}`,
+      FAILURE: `✗ ${shortName}`,
+      ERROR: `✗ ${shortName}`,
+      TIMEOUT: `⏱ ${shortName}`,
+      PENDING: `◷ ${shortName}`,
+      IN_PROGRESS: `◷ ${shortName}`,
+      QUEUED: `◷ ${shortName}`,
+      WAITING: `◷ ${shortName}`,
+      CANCELLED: `⊘ ${shortName}`,
+      SKIPPED: `⊘ ${shortName}`,
+      NEUTRAL: `◯ ${shortName}`,
+    };
+    return labels[status] || `${shortName}`;
   },
 };
 
@@ -488,6 +699,7 @@ const Renderer = {
 // ===== APP =====
 const App = {
   repo: CONFIG.DEFAULT_REPO,
+  customRepos: [],
   currentState: 'open',
   currentPage: 1,
   currentSort: 'created',
@@ -497,26 +709,89 @@ const App = {
   currentPRs: [],
   currentTotalCount: 0,
   isLoading: false,
+  isLoadingAllStats: false,
 
   async init() {
     this.repo = await Storage.getRepo();
     GitHubAPI._token = await Storage.getToken();
     this.currentAuthor = await Storage.getUsername();
-    document.getElementById('repo-name').textContent = this.repo;
-
+    this.customRepos = await Storage.getCustomRepos();
+    
+    // 初始化项目选择下拉框
+    this.initRepoSelect();
+    
     this.renderAuthState();
     this.bindEvents();
     this.watchAuthStorage();
     await this.loadAll();
   },
 
+  initRepoSelect() {
+    const repoSelect = document.getElementById('repo-select');
+    if (!repoSelect) return;
+    
+    // 清空并填充下拉框
+    repoSelect.innerHTML = '';
+    
+    // 合并预设项目和自定义项目
+    const allRepos = this.getAllRepos();
+    
+    allRepos.forEach(repo => {
+      const option = document.createElement('option');
+      option.value = repo.value;
+      option.textContent = repo.label;
+      repoSelect.appendChild(option);
+    });
+    
+    // 检查当前项目是否在列表中
+    const isInList = allRepos.some(r => r.value === this.repo);
+    if (!isInList && this.repo) {
+      // 如果不在列表中，添加临时选项
+      const customOption = document.createElement('option');
+      customOption.value = this.repo;
+      customOption.textContent = this.repo + ' (Unlisted)';
+      repoSelect.appendChild(customOption);
+    }
+    
+    // 设置当前选中值
+    repoSelect.value = this.repo;
+  },
+
+  getAllRepos() {
+    // 合并预设项目和自定义项目，避免重复
+    const presetValues = new Set(CONFIG.PRESET_REPOS.map(r => r.value));
+    const filteredCustom = (this.customRepos || []).filter(r => !presetValues.has(r.value));
+    return [...CONFIG.PRESET_REPOS, ...filteredCustom];
+  },
+
   bindEvents() {
     // Refresh button
     document.getElementById('btn-refresh').addEventListener('click', () => this.refresh());
 
+    // Refresh all repos stats button
+    document.getElementById('btn-refresh-stats').addEventListener('click', () => this.loadAllReposStats());
+
     // Settings button
     document.getElementById('btn-settings').addEventListener('click', () => {
       chrome.runtime.openOptionsPage();
+    });
+
+    // Repo select
+    document.getElementById('repo-select').addEventListener('change', async e => {
+      if (this.isLoading) return;
+      const newRepo = e.target.value;
+      if (newRepo !== this.repo) {
+        this.repo = newRepo;
+        // 保存到 storage
+        await new Promise(resolve => {
+          chrome.storage.local.set({ repo: newRepo }, resolve);
+        });
+        // 清除缓存并重新加载
+        await Storage.clearCacheByPrefix('cache_');
+        this.currentPage = 1;
+        Renderer.renderStatsLoading();
+        await this.loadAll();
+      }
     });
 
     // State select
@@ -752,7 +1027,8 @@ const App = {
         const prNumbers = prs.map(pr => pr.number);
         const [ownerName, repoName] = this.repo.split('/');
 
-        GitHubAPI.batchGetComments(this.repo, prNumbers, (prNumber, ciStatus) => {
+        // 使用通用的 CI 状态获取方法（自动判断使用 Azure CI 或 GitHub Actions）
+        GitHubAPI.batchGetCIStatus(this.repo, prs, (prNumber, ciStatus) => {
           Renderer.updateCIStatus(prNumber, ciStatus);
           this.applyCIFilter();
         });
@@ -789,6 +1065,111 @@ const App = {
       btn.classList.remove('spinning');
       btn.disabled = false;
       container.classList.remove('loading');
+    }
+  },
+
+  // ===== ALL REPOS STATS =====
+  async loadAllReposStats() {
+    if (this.isLoadingAllStats) return;
+    this.isLoadingAllStats = true;
+
+    const refreshBtn = document.getElementById('btn-refresh-stats');
+    const totalOpenEl = document.getElementById('total-open');
+    const totalDoneEl = document.getElementById('total-done');
+    const totalCREl = document.getElementById('total-cr');
+    const hintEl = document.getElementById('summary-hint');
+
+    // Set loading state
+    refreshBtn.classList.add('loading');
+    refreshBtn.disabled = true;
+    totalOpenEl.textContent = '…';
+    totalDoneEl.textContent = '…';
+    totalCREl.textContent = '…';
+    hintEl.textContent = 'Loading...';
+    hintEl.classList.remove('error');
+
+    const allRepos = this.getAllRepos();
+    const author = this.currentAuthor;
+
+    let totalOpen = 0;
+    let totalDone = 0;
+    let totalCR = 0;
+    let completedRepos = 0;
+    let failedRepos = 0;
+
+    try {
+      // Load stats for all repos with concurrency limit
+      const CONCURRENT = 3;
+      const queue = [...allRepos];
+
+      const workers = Array.from({ length: CONCURRENT }, async () => {
+        while (queue.length > 0) {
+          const repo = queue.shift();
+          if (!repo) break;
+
+          try {
+            // Get basic stats
+            const stats = await GitHubAPI.getStats(repo.value, author);
+            totalOpen += stats.open;
+            totalDone += stats.closed + stats.merged;
+
+            // Update UI progressively
+            totalOpenEl.textContent = totalOpen.toLocaleString();
+            totalDoneEl.textContent = totalDone.toLocaleString();
+
+            // Get CR counts for open PRs (only if logged in)
+            if (GitHubAPI._token && stats.open > 0) {
+              const [ownerName, repoName] = repo.value.split('/');
+              // Get open PR numbers for this repo
+              const prs = await GitHubAPI.getPRList(repo.value, { state: 'open', page: 1, author });
+              const prNumbers = prs.slice(0, 20).map(pr => pr.number); // Limit to first 20 PRs
+
+              for (const prNumber of prNumbers) {
+                try {
+                  const crCount = await GitHubAPI.getUnresolvedThreadCount(ownerName, repoName, prNumber);
+                  if (crCount) {
+                    totalCR += crCount;
+                    totalCREl.textContent = totalCR.toLocaleString();
+                  }
+                } catch (e) {
+                  // Ignore individual CR errors
+                }
+              }
+            }
+
+            completedRepos++;
+            hintEl.textContent = `Loading... (${completedRepos}/${allRepos.length})`;
+          } catch (err) {
+            console.warn(`Failed to load stats for ${repo.value}:`, err.message);
+            failedRepos++;
+          }
+        }
+      });
+
+      await Promise.all(workers);
+
+      // Final update
+      if (failedRepos > 0) {
+        hintEl.textContent = `${completedRepos}/${allRepos.length} repos`;
+      } else {
+        const now = new Date();
+        hintEl.textContent = now.toLocaleTimeString();
+      }
+
+      if (!GitHubAPI._token) {
+        totalCREl.textContent = '—';
+        hintEl.textContent = 'Login for CR stats';
+        hintEl.classList.add('error');
+      }
+
+    } catch (err) {
+      console.error('Failed to load all repos stats:', err);
+      hintEl.textContent = `Error: ${err.message}`;
+      hintEl.classList.add('error');
+    } finally {
+      refreshBtn.classList.remove('loading');
+      refreshBtn.disabled = false;
+      this.isLoadingAllStats = false;
     }
   },
 };

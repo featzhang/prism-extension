@@ -24,7 +24,7 @@
       border-radius: 12px;
       padding: 28px 32px;
       width: 100%;
-      max-width: 480px;
+      max-width: 560px;
     }
 
     .page-header {
@@ -147,6 +147,27 @@
       background: #f3f4f6;
     }
 
+    .btn-danger {
+      padding: 4px 8px;
+      background: transparent;
+      color: #cf222e;
+      border: 1px solid #cf222e;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .btn-danger:hover {
+      background: #cf222e;
+      color: #ffffff;
+    }
+
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
     .save-status {
       font-size: 12px;
       color: #57606a;
@@ -167,27 +188,136 @@
       color: #cf222e;
     }
 
-    .example-repos {
-      margin-top: 8px;
+    /* Repo list styles */
+    .repo-list {
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 12px;
     }
 
-    .example-repos span {
+    .repo-list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #f6f8fa;
+      border-bottom: 1px solid #d0d7de;
       font-size: 12px;
+      font-weight: 600;
       color: #57606a;
     }
 
-    .example-repos button {
-      background: none;
-      border: none;
-      color: #0969da;
-      font-size: 12px;
-      cursor: pointer;
-      padding: 0 4px;
-      font-family: ui-monospace, SFMono-Regular, monospace;
+    .repo-list-items {
+      max-height: 240px;
+      overflow-y: auto;
     }
 
-    .example-repos button:hover {
-      text-decoration: underline;
+    .repo-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid #d0d7de;
+      transition: background 0.15s;
+    }
+
+    .repo-item:last-child {
+      border-bottom: none;
+    }
+
+    .repo-item:hover {
+      background: #f6f8fa;
+    }
+
+    .repo-item-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .repo-item-name {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 13px;
+      color: #24292f;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .repo-item-label {
+      font-size: 11px;
+      color: #57606a;
+    }
+
+    .repo-item-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: 500;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+
+    .repo-item-badge.preset {
+      background: #ddf4ff;
+      color: #0969da;
+    }
+
+    .repo-item-badge.custom {
+      background: #dafbe1;
+      color: #1a7f37;
+    }
+
+    .repo-item-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 12px;
+    }
+
+    .repo-empty {
+      padding: 20px;
+      text-align: center;
+      color: #57606a;
+      font-size: 13px;
+    }
+
+    /* Add repo form */
+    .add-repo-form {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .add-repo-form .form-input {
+      flex: 1;
+    }
+
+    .add-repo-form .btn-primary {
+      white-space: nowrap;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-row .form-input {
+      flex: 1;
+    }
+
+    .input-row .form-input.label-input {
+      flex: 0.6;
+    }
+
+    /* Section divider */
+    .section-divider {
+      height: 1px;
+      background: #d0d7de;
+      margin: 24px 0;
     }
   </style>
 </head>
@@ -196,33 +326,58 @@
     <div class="page-header">
       <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect width="28" height="28" rx="6" fill="#0969da"/>
-        <text x="14" y="20" text-anchor="middle" fill="white" font-size="16" font-weight="bold" font-family="Arial">F</text>
+        <text x="14" y="20" text-anchor="middle" fill="white" font-size="16" font-weight="bold" font-family="Arial">P</text>
       </svg>
       <h1>PRism — Settings</h1>
     </div>
 
+    <!-- Repository Management Section -->
     <div class="form-group">
-      <label class="form-label" for="repo-input">GitHub Repository</label>
-      <span class="form-hint">Format: <code>owner/repo</code> (e.g., apache/flink)</span>
-      <input
-        type="text"
-        id="repo-input"
-        class="form-input"
-        placeholder="apache/flink"
-        spellcheck="false"
-        autocomplete="off"
-      >
-      <div class="field-error" id="repo-error">
-        Invalid format. Use <code>owner/repo</code> (only letters, numbers, hyphens, underscores, dots allowed).
+      <label class="form-label">Repositories</label>
+      <span class="form-hint">Manage the repositories that appear in the dropdown menu. Preset repos cannot be deleted.</span>
+      
+      <div class="repo-list">
+        <div class="repo-list-header">
+          <span>Repository List</span>
+          <span id="repo-count">0 repos</span>
+        </div>
+        <div class="repo-list-items" id="repo-list-items">
+          <!-- Repos will be rendered here -->
+        </div>
       </div>
-      <div class="example-repos">
-        <span>Examples:</span>
-        <button type="button" data-repo="apache/flink">apache/flink</button>
-        <button type="button" data-repo="apache/kafka">apache/kafka</button>
-        <button type="button" data-repo="apache/spark">apache/spark</button>
+
+      <!-- Add new repo form -->
+      <div class="add-repo-form">
+        <div style="flex: 1;">
+          <div class="input-row">
+            <input
+              type="text"
+              id="new-repo-input"
+              class="form-input"
+              placeholder="owner/repo (e.g., apache/kafka)"
+              spellcheck="false"
+              autocomplete="off"
+            >
+            <input
+              type="text"
+              id="new-repo-label"
+              class="form-input label-input"
+              placeholder="Display name (optional)"
+              spellcheck="false"
+              autocomplete="off"
+            >
+          </div>
+          <div class="field-error" id="new-repo-error">
+            Invalid format. Use <code>owner/repo</code> (only letters, numbers, hyphens, underscores, dots allowed).
+          </div>
+        </div>
+        <button class="btn-primary btn-small" id="btn-add-repo">Add</button>
       </div>
     </div>
 
+    <div class="section-divider"></div>
+
+    <!-- GitHub Username Section -->
     <div class="form-group">
       <label class="form-label" for="username-input">GitHub Username</label>
       <span class="form-hint">Used as the default author filter in the PR list. Leave empty to show all PRs.</span>
