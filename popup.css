@@ -394,6 +394,44 @@ body {
   gap: 4px;
 }
 
+.pr-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.expert-suggestion-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 12px;
+  padding: 0;
+  border: none;
+  opacity: 0.7;
+}
+
+.expert-suggestion-btn:hover {
+  color: var(--text-primary);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.expert-suggestion-btn:active {
+  transform: scale(0.95);
+}
+
+.expert-suggestion-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .pr-title-row {
   display: block;
 }
@@ -704,4 +742,319 @@ body {
 
 .pr-list-container::-webkit-scrollbar-thumb:hover {
   background: #a8b1ba;
+}
+
+/* ===== Expert Recommendation ===== */
+.expert-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.expert-btn:hover {
+  background: var(--bg-hover);
+  border-color: #a8b1ba;
+}
+
+.expert-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.expert-panel {
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  max-height: 200px;
+  overflow-y: auto;
+  transition: all 0.3s ease;
+}
+
+.expert-panel.hidden {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.expert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.expert-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.expert-list {
+  padding: 8px 16px;
+}
+
+.expert-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.expert-item:last-child {
+  border-bottom: none;
+}
+
+.expert-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expert-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.expert-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.expert-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.expert-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.expert-score {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.expert-score-badge {
+  padding: 2px 6px;
+  border-radius: 12px;
+  background: #e7f3ff;
+  color: #0969da;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.expert-score-high {
+  background: #e6ffec;
+  color: #1a7f37;
+}
+
+.expert-score-medium {
+  background: #fff8c5;
+  color: #9a6700;
+}
+
+.expert-score-low {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.expert-pr-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.expert-pr-item:last-child {
+  border-bottom: none;
+}
+
+.expert-pr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.expert-pr-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.expert-pr-number {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.expert-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.expert-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+}
+
+.expert-suggestion-score {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ===== Expert Results Row ===== */
+.expert-results-row {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  border-radius: 0 0 6px 6px;
+}
+
+.expert-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.expert-loading .spinner.small {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+
+.expert-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.expert-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.expert-toggle-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.expert-toggle-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.expert-toggle-btn svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.2s;
+}
+
+.expert-toggle-btn:hover svg {
+  transform: scale(1.1);
+}
+
+.expert-github-link {
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  align-items: center;
+}
+
+.expert-github-link:hover {
+  opacity: 0.8;
+}
+
+.expert-results-row .expert-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.expert-results-row .expert-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+}
+
+.expert-results-row .expert-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-total);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.expert-results-row .expert-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.expert-results-row .expert-score-badge {
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.expert-results-row .expert-description {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.hidden {
+  display: none !important;
 }

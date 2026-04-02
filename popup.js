@@ -620,8 +620,18 @@ const Renderer = {
               ${pr.comments || 0}
             </span>
             <span id="ci-${pr.number}" class="ci-loading">loading CI…</span>
+            <button class="expert-suggestion-btn" 
+                    data-pr-number="${pr.number}"
+                    title="Suggest experts for this PR">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/>
+                <path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
+              </svg>
+            </button>
             <span id="cr-${pr.number}"></span>
           </div>
+          <div id="expert-results-${pr.number}" class="expert-results-row hidden"></div>
         </div>
       `;
     }).join('');
@@ -697,7 +707,7 @@ const Renderer = {
 };
 
 // ===== APP =====
-const App = {
+window.App = {
   repo: CONFIG.DEFAULT_REPO,
   customRepos: [],
   currentState: 'open',
@@ -840,6 +850,297 @@ const App = {
     // Login / Logout
     document.getElementById('btn-login').addEventListener('click', () => this.startLogin());
     document.getElementById('btn-logout').addEventListener('click', () => this.logout());
+
+    // Expert recommendation
+    document.getElementById('btn-close-experts').addEventListener('click', () => this.hideExpertPanel());
+
+    // Expert suggestion buttons (event delegation)
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.expert-suggestion-btn')) {
+        console.log('Expert suggestion button clicked');
+        const button = e.target.closest('.expert-suggestion-btn');
+        const prNumber = button.getAttribute('data-pr-number');
+        console.log(`PR number: ${prNumber}`);
+        if (prNumber) {
+          window.App.suggestExpertsForSinglePR(parseInt(prNumber));
+        }
+      }
+    });
+  },
+
+  // 显示专家推荐面板
+  showExpertPanel() {
+    const panel = document.getElementById('expert-panel');
+    panel.classList.remove('hidden');
+  },
+
+  // 隐藏专家推荐面板
+  hideExpertPanel() {
+    const panel = document.getElementById('expert-panel');
+    panel.classList.add('hidden');
+  },
+
+  // 在PR item下方显示专家推荐加载状态
+  showExpertLoading(prNumber) {
+    const expertRow = document.getElementById(`expert-results-${prNumber}`);
+    if (expertRow) {
+      expertRow.innerHTML = `
+        <div class="expert-loading">
+          <div class="spinner small"></div>
+          <span>Analyzing for expert recommendations...</span>
+        </div>
+      `;
+      expertRow.classList.remove('hidden');
+    } else {
+      // 创建新的专家结果行
+      const prItem = document.querySelector(`.pr-item[data-pr-number="${prNumber}"]`);
+      if (prItem) {
+        const expertRow = document.createElement('div');
+        expertRow.id = `expert-results-${prNumber}`;
+        expertRow.className = 'expert-results-row';
+        expertRow.innerHTML = `
+          <div class="expert-loading">
+            <div class="spinner small"></div>
+            <span>Analyzing for expert recommendations...</span>
+          </div>
+        `;
+        prItem.appendChild(expertRow);
+      }
+    }
+  },
+
+  // 在PR item下方显示专家推荐结果
+  showExpertResults(prNumber, experts) {
+    const expertRow = document.getElementById(`expert-results-${prNumber}`);
+    if (!expertRow) return;
+
+    if (!experts || experts.length === 0) {
+      expertRow.innerHTML = `
+        <div class="expert-empty">
+          <span>No expert recommendations found for this PR</span>
+        </div>
+      `;
+      return;
+    }
+
+    let html = `
+      <div class="expert-results-header">
+        <span>Recommended Reviewers:</span>
+        <button class="expert-toggle-btn" onclick="app.toggleExpertResults(${prNumber})" title="Hide recommendations">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>
+        </button>
+      </div>
+      <div class="expert-suggestions">
+    `;
+
+    experts.forEach(expert => {
+      const scoreClass = this.getExpertScoreClass(expert.score);
+      html += `
+        <div class="expert-suggestion">
+          <a href="https://github.com/${expert.author}" target="_blank" class="expert-github-link" title="View GitHub profile">
+            <span class="expert-avatar">${expert.author.charAt(0).toUpperCase()}</span>
+          </a>
+          <span class="expert-name">${expert.author}</span>
+          <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
+          <span class="expert-description">${expert.expertise}</span>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    expertRow.innerHTML = html;
+    expertRow.classList.remove('hidden');
+  },
+
+  // 切换专家推荐结果的显示/隐藏
+  toggleExpertResults(prNumber) {
+    const expertRow = document.getElementById(`expert-results-${prNumber}`);
+    if (expertRow) {
+      expertRow.classList.toggle('hidden');
+      const toggleBtn = expertRow.querySelector('.expert-toggle-btn');
+      if (toggleBtn) {
+        const isHidden = expertRow.classList.contains('hidden');
+        toggleBtn.innerHTML = isHidden 
+          ? '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>'
+          : '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z" transform="rotate(90 8 8)"/></svg>';
+        toggleBtn.title = isHidden ? 'Show recommendations' : 'Hide recommendations';
+      }
+    }
+  },
+
+  // 为当前PR列表推荐专家
+  async suggestExperts() {
+    if (this.isLoading || this.currentPRs.length === 0) return;
+
+    const btn = document.getElementById('btn-suggest-experts');
+    const originalText = btn.innerHTML;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/><path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg> Analyzing...';
+
+    try {
+      this.showExpertPanel();
+      const expertList = document.getElementById('expert-list');
+      expertList.innerHTML = '<div class="loading"><div class="spinner"></div><span>Analyzing PRs for expert recommendations...</span></div>';
+
+      const prNumbers = this.currentPRs.map(pr => pr.number);
+      const expertResults = {};
+
+      await ExpertRecommender.batchSuggestExperts(this.repo, prNumbers, (prNumber, experts) => {
+        expertResults[prNumber] = experts;
+        this.updateExpertPanel(expertResults);
+      });
+
+    } catch (error) {
+      console.error('Failed to suggest experts:', error);
+      const expertList = document.getElementById('expert-list');
+      expertList.innerHTML = `<div class="empty-state">Failed to get expert recommendations: ${error.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  },
+
+  // 为单个PR推荐专家
+  async suggestExpertsForSinglePR(prNumber) {
+    console.log(`点击专家推荐按钮，PR #${prNumber}`);
+    
+    // 检查是否已经显示了推荐结果
+    const expertRow = document.getElementById(`expert-results-${prNumber}`);
+    if (expertRow && !expertRow.classList.contains('hidden')) {
+      // 如果已经显示，则隐藏
+      this.toggleExpertResults(prNumber);
+      return;
+    }
+
+    if (this.isLoading) return;
+
+    this.isLoading = true;
+    const btn = document.querySelector(`.expert-btn[data-pr="${prNumber}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/><path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>';
+    }
+
+    try {
+      console.log(`开始处理PR #${prNumber}的专家推荐，仓库: ${this.repo}`);
+      // 显示加载状态在PR item下方
+      this.showExpertLoading(prNumber);
+
+      // 获取单个PR的专家推荐
+      const experts = await ExpertRecommender.suggestExpertsForPR(this.repo, prNumber);
+      console.log(`PR #${prNumber}专家推荐结果:`, experts);
+      
+      // 在PR item下方显示专家推荐结果
+      this.showExpertResults(prNumber, experts);
+    } catch (error) {
+      console.error(`Failed to suggest experts for PR #${prNumber}:`, error);
+      const expertList = document.getElementById('expert-list');
+      expertList.innerHTML = `<div class="empty-state">Failed to get expert recommendations for PR #${prNumber}: ${error.message}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHTML;
+    }
+  },
+
+  // 为单个PR更新专家推荐面板
+  updateExpertPanelForSinglePR(prNumber, experts) {
+    const expertList = document.getElementById('expert-list');
+    
+    if (!experts || experts.length === 0) {
+      expertList.innerHTML = `<div class="empty-state">No expert recommendations found for PR #${prNumber}</div>`;
+      return;
+    }
+
+    // 找到对应的PR信息
+    const pr = this.currentPRs.find(p => p.number === prNumber);
+    if (!pr) return;
+
+    let html = `
+      <div class="expert-pr-item">
+        <div class="expert-pr-header">
+          <span class="expert-pr-title">PR #${prNumber}</span>
+          <span class="expert-pr-number">${escapeHtml(pr.title)}</span>
+        </div>
+        <div class="expert-suggestions">
+    `;
+
+    experts.forEach(expert => {
+      const scoreClass = this.getExpertScoreClass(expert.score);
+      html += `
+        <div class="expert-suggestion">
+          <span class="expert-avatar">${expert.author.charAt(0).toUpperCase()}</span>
+          <span class="expert-name">${expert.author}</span>
+          <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
+          <span class="expert-description">${expert.expertise}</span>
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+      </div>
+    `;
+
+    expertList.innerHTML = html;
+  },
+
+  // 更新专家推荐面板
+  updateExpertPanel(expertResults) {
+    const expertList = document.getElementById('expert-list');
+    
+    if (Object.keys(expertResults).length === 0) {
+      expertList.innerHTML = '<div class="empty-state">No expert recommendations available</div>';
+      return;
+    }
+
+    let html = '';
+    
+    // 为每个PR显示专家推荐
+    this.currentPRs.forEach(pr => {
+      const experts = expertResults[pr.number] || [];
+      if (experts.length === 0) return;
+
+      html += `
+        <div class="expert-pr-item">
+          <div class="expert-pr-header">
+            <span class="expert-pr-title">PR #${pr.number}</span>
+            <span class="expert-pr-number">${pr.title}</span>
+          </div>
+          <div class="expert-suggestions">
+      `;
+
+      experts.forEach(expert => {
+        const scoreClass = this.getExpertScoreClass(expert.score);
+        html += `
+          <div class="expert-suggestion">
+            <span class="expert-avatar">${expert.author.charAt(0).toUpperCase()}</span>
+            <span class="expert-name">${expert.author}</span>
+            <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
+            <span class="expert-description">${expert.expertise}</span>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+        </div>
+      `;
+    });
+
+    if (html === '') {
+      html = '<div class="empty-state">No expert recommendations found for current PRs</div>';
+    }
+
+    expertList.innerHTML = html;
+  },
+
+  // 根据专家评分获取CSS类
+  getExpertScoreClass(score) {
+    if (score >= 80) return 'expert-score-high';
+    if (score >= 60) return 'expert-score-medium';
+    if (score >= 40) return 'expert-score-low';
+    return 'expert-score-low';
   },
 
   renderAuthState() {
@@ -1173,6 +1474,191 @@ const App = {
     }
   },
 };
+
+// ===== EXPERT RECOMMENDATION =====
+const ExpertRecommender = {
+  // 获取文件的历史贡献者
+  async getFileContributors(repo, filePath, limit = 10) {
+    const cacheKey = `cache_contributors_${repo}_${btoa(filePath)}`;
+    const cached = await Storage.getCache(cacheKey);
+    if (cached) {
+      console.log(`使用缓存获取 ${filePath} 的贡献者`);
+      return cached;
+    }
+
+    try {
+      // 使用GitHub API获取文件提交历史
+      const url = `${CONFIG.GITHUB_API}/repos/${repo}/commits?path=${encodeURIComponent(filePath)}&per_page=${limit}`;
+      console.log(`获取文件贡献者: ${url}`);
+      console.log(`当前GitHub Token状态: ${GitHubAPI._token ? '已设置' : '未设置'}`);
+      const commits = await GitHubAPI.fetch(url);
+      console.log(`文件 ${filePath} 的提交历史获取成功，共${commits.length}条提交`);
+      
+      // 统计每个作者的提交次数
+      const contributors = {};
+      commits.forEach(commit => {
+        const author = commit.author?.login || commit.commit.author.name;
+        if (author) {
+          contributors[author] = (contributors[author] || 0) + 1;
+        }
+      });
+
+      // 转换为排序数组
+      const result = Object.entries(contributors)
+        .map(([author, count]) => ({ author, count, lastCommit: commits[0]?.commit.author.date }))
+        .sort((a, b) => b.count - a.count);
+
+      await Storage.setCache(cacheKey, result, CONFIG.TTL_COMMENTS);
+      return result;
+    } catch (error) {
+      console.warn(`Failed to get contributors for ${filePath}:`, error.message);
+      return [];
+    }
+  },
+
+  // 分析PR的变更文件并推荐专家
+  async suggestExpertsForPR(repo, prNumber) {
+    try {
+      console.log(`开始分析PR #${prNumber}的专家推荐...`);
+      // 获取PR的变更文件列表
+      const prDetail = await GitHubAPI.getPRDetail(repo, prNumber);
+      console.log(`PR详情获取成功:`, prDetail);
+      // 使用标准的GitHub API端点获取PR文件列表（支持分页）
+      let allFiles = [];
+      let page = 1;
+      const perPage = 100; // GitHub API每页最大数量
+      
+      while (true) {
+        const filesUrl = `${CONFIG.GITHUB_API}/repos/${repo}/pulls/${prNumber}/files?page=${page}&per_page=${perPage}`;
+        console.log(`获取文件列表第${page}页: ${filesUrl}`);
+        const files = await GitHubAPI.fetch(filesUrl);
+        
+        if (files.length === 0) break;
+        
+        allFiles = allFiles.concat(files);
+        
+        // 如果获取的文件数量少于每页数量，说明已经是最后一页
+        if (files.length < perPage) break;
+        
+        page++;
+      }
+      
+      console.log(`文件列表获取成功，共${allFiles.length}个文件`);
+      if (allFiles.length === 0) {
+        console.warn(`PR #${prNumber}没有变更文件`);
+        return [];
+      }
+      
+      // 对每个文件获取贡献者
+      const fileExperts = await Promise.all(
+        allFiles.map(async file => {
+          const contributors = await this.getFileContributors(repo, file.filename, 5);
+          return {
+            file: file.filename,
+            contributors: contributors
+          };
+        })
+      );
+
+      // 合并所有贡献者并计算综合评分
+      const expertScores = {};
+      
+      fileExperts.forEach(fileData => {
+        fileData.contributors.forEach(contributor => {
+          if (!expertScores[contributor.author]) {
+            expertScores[contributor.author] = {
+              author: contributor.author,
+              totalCommits: 0,
+              fileCount: 0,
+              recentActivity: 0,
+              score: 0
+            };
+          }
+          
+          const expert = expertScores[contributor.author];
+          expert.totalCommits += contributor.count;
+          expert.fileCount += 1;
+          
+          // 时间衰减因子：最近6个月的提交权重更高
+          if (contributor.lastCommit) {
+            const monthsAgo = this.getMonthsAgo(contributor.lastCommit);
+            const timeWeight = Math.max(0, 1 - monthsAgo / 6); // 6个月内线性衰减
+            expert.recentActivity += contributor.count * timeWeight;
+          }
+        });
+      });
+
+      // 计算综合评分
+      const experts = Object.values(expertScores).map(expert => {
+        // 评分公式：基础提交数 + 文件覆盖度 + 近期活跃度
+        const baseScore = Math.log(expert.totalCommits + 1) * 10;
+        const fileCoverage = expert.fileCount / allFiles.length * 20;
+        const recentScore = expert.recentActivity * 5;
+        
+        expert.score = baseScore + fileCoverage + recentScore;
+        return expert;
+      });
+
+      // 按评分排序并返回前5名专家
+      return experts
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+        .map(expert => ({
+          author: expert.author,
+          score: Math.round(expert.score),
+          expertise: this.getExpertiseDescription(expert, fileExperts.length)
+        }));
+
+    } catch (error) {
+      console.warn(`Failed to suggest experts for PR #${prNumber}:`, error.message);
+      return [];
+    }
+  },
+
+  // 计算距离现在的月数
+  getMonthsAgo(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    return (now.getFullYear() - date.getFullYear()) * 12 + 
+           (now.getMonth() - date.getMonth());
+  },
+
+  // 生成专家描述
+  getExpertiseDescription(expert, totalFiles) {
+    const coverage = Math.round((expert.fileCount / totalFiles) * 100);
+    if (coverage >= 80) return 'Primary expert';
+    if (coverage >= 50) return 'Key contributor';
+    if (expert.totalCommits > 10) return 'Experienced contributor';
+    return 'Occasional contributor';
+  },
+
+  // 批量获取多个PR的专家推荐
+  async batchSuggestExperts(repo, prNumbers, onResult) {
+    const queue = [...prNumbers];
+    const workers = Array.from({ length: CONFIG.CONCURRENT }, async () => {
+      while (queue.length > 0) {
+        const prNumber = queue.shift();
+        if (prNumber === undefined) break;
+        
+        try {
+          const experts = await this.suggestExpertsForPR(repo, prNumber);
+          onResult(prNumber, experts);
+        } catch (err) {
+          console.warn(`Failed to get experts for PR #${prNumber}:`, err.message);
+          onResult(prNumber, []);
+        }
+      }
+    });
+    
+    await Promise.all(workers);
+  }
+};
+
+// 在CONFIG中添加专家推荐相关的配置
+if (typeof CONFIG !== 'undefined') {
+  CONFIG.TTL_COMMENTS = CONFIG.TTL_COMMENTS || 5 * 60 * 1000;
+  CONFIG.CONCURRENT = CONFIG.CONCURRENT || 4;
+}
 
 // ===== ENTRY POINT =====
 document.addEventListener('DOMContentLoaded', () => {
