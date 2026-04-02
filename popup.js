@@ -94,21 +94,45 @@ const Storage = {
 const GitHubAPI = {
   _token: '',
 
-  async fetch(url) {
+  async fetch(url, retries = 3, delay = 1000) {
     const headers = {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'Flink-PR-Status-Extension/1.0',
     };
     if (this._token) headers['Authorization'] = `Bearer ${this._token}`;
 
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) {
-      const msg = resp.status === 403
-        ? 'Rate limit exceeded. Please wait before refreshing.'
-        : `GitHub API error: ${resp.status} ${resp.statusText}`;
-      throw new Error(msg);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const resp = await fetch(url, { headers });
+        
+        if (resp.ok) {
+          return resp.json();
+        }
+        
+        // 如果是503错误，进行重试
+        if (resp.status === 503 && attempt < retries) {
+          console.warn(`GitHub API 503 error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // 指数退避
+          continue;
+        }
+        
+        const msg = resp.status === 403
+          ? 'Rate limit exceeded. Please wait before refreshing.'
+          : `GitHub API error: ${resp.status} ${resp.statusText}`;
+        throw new Error(msg);
+        
+      } catch (error) {
+        // 如果是网络错误或503错误且还有重试机会，继续重试
+        if ((error.message.includes('Failed to fetch') || error.message.includes('503')) && attempt < retries) {
+          console.warn(`Network error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // 指数退避
+          continue;
+        }
+        throw error;
+      }
     }
-    return resp.json();
   },
 
   async getStats(repo, author = '') {
@@ -116,22 +140,33 @@ const GitHubAPI = {
     const cached = await Storage.getCache(cacheKey);
     if (cached) return cached;
 
-    const authorQ = author ? `+author:${encodeURIComponent(author)}` : '';
-    const [openResult, closedResult, mergedResult] = await Promise.all([
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:open${authorQ}&per_page=1`),
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:closed+is:unmerged${authorQ}&per_page=1`),
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:merged${authorQ}&per_page=1`),
-    ]);
+    try {
+      const authorQ = author ? `+author:${encodeURIComponent(author)}` : '';
+      const [openResult, closedResult, mergedResult] = await Promise.all([
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:open${authorQ}&per_page=1`),
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:closed+is:unmerged${authorQ}&per_page=1`),
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:merged${authorQ}&per_page=1`),
+      ]);
 
-    const stats = {
-      open: openResult.total_count,
-      closed: closedResult.total_count,
-      merged: mergedResult.total_count,
-      total: openResult.total_count + closedResult.total_count + mergedResult.total_count,
-    };
+      const stats = {
+        open: openResult.total_count,
+        closed: closedResult.total_count,
+        merged: mergedResult.total_count,
+        total: openResult.total_count + closedResult.total_count + mergedResult.total_count,
+      };
 
-    await Storage.setCache(cacheKey, stats, CONFIG.TTL_STATS);
-    return stats;
+      await Storage.setCache(cacheKey, stats, CONFIG.TTL_STATS);
+      return stats;
+    } catch (error) {
+      console.warn(`Failed to get stats for ${repo}:`, error.message);
+      // 返回默认的空统计数据，而不是抛出错误
+      return {
+        open: 0,
+        closed: 0,
+        merged: 0,
+        total: 0
+      };
+    }
   },
 
   async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '' } = {}) {
