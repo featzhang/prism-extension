@@ -54,10 +54,17 @@ class ExpertRecommender {
     try {
       console.log(`Starting expert recommendation analysis for PR #${prNumber}...`);
       
-      // Check if we're likely to hit rate limits
-      const rateLimitInfo = await this.checkRateLimit();
-      if (rateLimitInfo && rateLimitInfo.remaining < 10) {
-        throw new Error(`GitHub API rate limit is low (${rateLimitInfo.remaining} remaining). Please wait ${rateLimitInfo.resetInMinutes} minutes before trying again.`);
+      // Check rate limit status with detailed information
+      const rateLimitStatus = await this.getRateLimitStatus();
+      console.log(`Rate limit status: ${rateLimitStatus.status}`);
+      
+      if (rateLimitStatus.status === 'exhausted') {
+        throw new Error(rateLimitStatus.message);
+      }
+      
+      if (rateLimitStatus.status === 'low' && rateLimitStatus.remaining < 5) {
+        // If very low, suggest waiting
+        throw new Error(`${rateLimitStatus.message} Consider waiting for the limit to reset.`);
       }
       
       // Get PR changed files list
@@ -91,7 +98,7 @@ class ExpertRecommender {
       }
       
       // Limit the number of files to analyze to avoid rate limits
-      const maxFilesToAnalyze = 20;
+      const maxFilesToAnalyze = rateLimitStatus.status === 'low' ? 10 : 20;
       const filesToAnalyze = allFiles.slice(0, maxFilesToAnalyze);
       
       if (allFiles.length > maxFilesToAnalyze) {
@@ -103,9 +110,10 @@ class ExpertRecommender {
       for (let i = 0; i < filesToAnalyze.length; i++) {
         const file = filesToAnalyze[i];
         
-        // Add small delay between API calls to avoid hitting rate limits
+        // Add delay between API calls based on rate limit status
         if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          const delay = rateLimitStatus.status === 'low' ? 500 : 200;
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
         
         try {
@@ -177,8 +185,8 @@ class ExpertRecommender {
     } catch (error) {
       console.error(`Failed to suggest experts for PR #${prNumber}:`, error.message);
       // Re-throw with more descriptive error for the UI
-      if (error.message.includes('Rate limit')) {
-        throw new Error(`GitHub API rate limit exceeded. Please wait a few minutes before trying again.`);
+      if (error.message.includes('Rate limit') || error.message.includes('rate limit')) {
+        throw new Error(`GitHub API rate limit issue: ${error.message}`);
       }
       throw new Error(`Unable to get expert recommendations: ${error.message}`);
     }
@@ -205,6 +213,49 @@ class ExpertRecommender {
     } catch (error) {
       console.warn('Failed to check rate limit:', error.message);
       return null;
+    }
+  }
+
+  // Get rate limit status with detailed information
+  async getRateLimitStatus() {
+    const rateLimitInfo = await this.checkRateLimit();
+    if (!rateLimitInfo) {
+      return {
+        status: 'unknown',
+        message: 'Unable to check rate limit status'
+      };
+    }
+
+    const { remaining, limit, resetInMinutes } = rateLimitInfo;
+    
+    if (remaining === 0) {
+      return {
+        status: 'exhausted',
+        message: `GitHub API rate limit exhausted (${remaining}/${limit} remaining). Please wait ${resetInMinutes} minutes before trying again.`,
+        resetInMinutes: resetInMinutes,
+        suggestions: [
+          'Wait for the rate limit to reset automatically',
+          'Use a GitHub Personal Access Token for higher limits (5000/hour)',
+          'Try again later when the limit resets'
+        ]
+      };
+    } else if (remaining < 10) {
+      return {
+        status: 'low',
+        message: `GitHub API rate limit is low (${remaining}/${limit} remaining). Consider waiting or using a token.`,
+        remaining: remaining,
+        suggestions: [
+          'Proceed with caution - may hit rate limit soon',
+          'Consider using a GitHub Personal Access Token',
+          'Limit the number of PRs analyzed'
+        ]
+      };
+    } else {
+      return {
+        status: 'healthy',
+        message: `GitHub API rate limit is healthy (${remaining}/${limit} remaining)`,
+        remaining: remaining
+      };
     }
   }
 
