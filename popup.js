@@ -2,7 +2,7 @@
 
 // ===== CONFIG =====
 const CONFIG = {
-  PER_PAGE: 20,
+  DEFAULT_PER_PAGE: 10,
   CONCURRENT: 4,
   TTL_STATS: 10 * 60 * 1000,   // 10 minutes
   TTL_PRS: 5 * 60 * 1000,      // 5 minutes
@@ -88,27 +88,70 @@ const Storage = {
       chrome.storage.local.remove(['gh_token', 'username', 'gh_login_error'], resolve);
     });
   },
+
+  async getUserConfig(key, defaultValue) {
+    return new Promise(resolve => {
+      chrome.storage.local.get('userConfig', result => {
+        const config = result.userConfig || {};
+        resolve(config[key] !== undefined ? config[key] : defaultValue);
+      });
+    });
+  },
+
+  async setUserConfig(key, value) {
+    return new Promise(resolve => {
+      chrome.storage.local.get('userConfig', result => {
+        const config = result.userConfig || {};
+        config[key] = value;
+        chrome.storage.local.set({ userConfig: config }, resolve);
+      });
+    });
+  },
 };
 
 // ===== GITHUB API =====
 const GitHubAPI = {
   _token: '',
 
-  async fetch(url) {
+  async fetch(url, retries = 3, delay = 1000) {
     const headers = {
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'Flink-PR-Status-Extension/1.0',
     };
     if (this._token) headers['Authorization'] = `Bearer ${this._token}`;
 
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) {
-      const msg = resp.status === 403
-        ? 'Rate limit exceeded. Please wait before refreshing.'
-        : `GitHub API error: ${resp.status} ${resp.statusText}`;
-      throw new Error(msg);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const resp = await fetch(url, { headers });
+        
+        if (resp.ok) {
+          return resp.json();
+        }
+        
+        // 如果是503错误，进行重试
+        if (resp.status === 503 && attempt < retries) {
+          console.warn(`GitHub API 503 error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // 指数退避
+          continue;
+        }
+        
+        const msg = resp.status === 403
+          ? 'Rate limit exceeded. Please wait before refreshing.'
+          : `GitHub API error: ${resp.status} ${resp.statusText}`;
+        throw new Error(msg);
+        
+      } catch (error) {
+        // 如果是网络错误或503错误且还有重试机会，继续重试
+        if ((error.message.includes('Failed to fetch') || error.message.includes('503')) && attempt < retries) {
+          console.warn(`Network error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; // 指数退避
+          continue;
+        }
+        throw error;
+      }
     }
-    return resp.json();
   },
 
   async getStats(repo, author = '') {
@@ -116,26 +159,37 @@ const GitHubAPI = {
     const cached = await Storage.getCache(cacheKey);
     if (cached) return cached;
 
-    const authorQ = author ? `+author:${encodeURIComponent(author)}` : '';
-    const [openResult, closedResult, mergedResult] = await Promise.all([
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:open${authorQ}&per_page=1`),
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:closed+is:unmerged${authorQ}&per_page=1`),
-      this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:merged${authorQ}&per_page=1`),
-    ]);
+    try {
+      const authorQ = author ? `+author:${encodeURIComponent(author)}` : '';
+      const [openResult, closedResult, mergedResult] = await Promise.all([
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:open${authorQ}&per_page=1`),
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:closed+is:unmerged${authorQ}&per_page=1`),
+        this.fetch(`${CONFIG.GITHUB_API}/search/issues?q=repo:${repo}+is:pr+is:merged${authorQ}&per_page=1`),
+      ]);
 
-    const stats = {
-      open: openResult.total_count,
-      closed: closedResult.total_count,
-      merged: mergedResult.total_count,
-      total: openResult.total_count + closedResult.total_count + mergedResult.total_count,
-    };
+      const stats = {
+        open: openResult.total_count,
+        closed: closedResult.total_count,
+        merged: mergedResult.total_count,
+        total: openResult.total_count + closedResult.total_count + mergedResult.total_count,
+      };
 
-    await Storage.setCache(cacheKey, stats, CONFIG.TTL_STATS);
-    return stats;
+      await Storage.setCache(cacheKey, stats, CONFIG.TTL_STATS);
+      return stats;
+    } catch (error) {
+      console.warn(`Failed to get stats for ${repo}:`, error.message);
+      // 返回默认的空统计数据，而不是抛出错误
+      return {
+        open: 0,
+        closed: 0,
+        merged: 0,
+        total: 0
+      };
+    }
   },
 
-  async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '' } = {}) {
-    const cacheKey = `cache_prs_${repo}_${state}_${sort}_${direction}_p${page}_a${author}`;
+  async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '', perPage = CONFIG.DEFAULT_PER_PAGE } = {}) {
+    const cacheKey = `cache_prs_${repo}_${state}_${sort}_${direction}_p${page}_a${author}_pp${perPage}`;
     const cached = await Storage.getCache(cacheKey);
     if (cached) return cached;
 
@@ -145,13 +199,13 @@ const GitHubAPI = {
       const stateQ = state === 'merged' ? 'is:merged' : (state === 'all' ? '' : `is:${state}`);
       const q = `repo:${repo}+is:pr+author:${encodeURIComponent(author)}${stateQ ? '+' + stateQ : ''}`;
       const sortParam = sort === 'updated' ? 'updated' : 'created';
-      const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${CONFIG.PER_PAGE}`;
+      const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${perPage}`;
       const result = await this.fetch(url);
       prs = result.items;
       // Search API returns issues; map pull_request field presence is guaranteed for is:pr
     } else {
       const apiState = state === 'all' ? 'all' : (state === 'merged' ? 'closed' : state);
-      const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${CONFIG.PER_PAGE}&sort=${sort}&direction=${direction}`;
+      const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${perPage}&sort=${sort}&direction=${direction}`;
       prs = await this.fetch(url);
       if (state === 'merged') {
         prs = prs.filter(pr => pr.merged_at != null);
@@ -688,8 +742,9 @@ const Renderer = {
     if (el) el.textContent = total.toLocaleString();
   },
 
-  renderPagination(page, hasMore, totalCount) {
-    const totalPages = totalCount > 0 ? Math.ceil(totalCount / CONFIG.PER_PAGE) : (hasMore ? '?' : page);
+  async renderPagination(page, hasMore, totalCount) {
+    const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / userPerPage) : (hasMore ? '?' : page);
     document.getElementById('page-info').textContent = `Page ${page} / ${totalPages}`;
     document.getElementById('btn-prev').disabled = page <= 1;
     document.getElementById('btn-next').disabled = !hasMore;
@@ -729,6 +784,13 @@ window.App = {
     
     // 初始化项目选择下拉框
     this.initRepoSelect();
+    
+    // 初始化分页大小选择
+    const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+    const pageSizeSelect = document.getElementById('page-size-select');
+    if (pageSizeSelect) {
+      pageSizeSelect.value = userPerPage;
+    }
     
     this.renderAuthState();
     this.bindEvents();
@@ -822,6 +884,15 @@ window.App = {
       this.loadPRs();
     });
 
+    // Page size control
+    document.getElementById('page-size-select').addEventListener('change', async e => {
+      if (this.isLoading) return;
+      const perPage = parseInt(e.target.value);
+      await Storage.setUserConfig('perPage', perPage);
+      this.currentPage = 1;
+      this.loadPRs();
+    });
+
     // Pagination
     document.getElementById('btn-prev').addEventListener('click', () => {
       if (this.currentPage > 1) {
@@ -853,6 +924,9 @@ window.App = {
 
     // Expert recommendation
     document.getElementById('btn-close-experts').addEventListener('click', () => this.hideExpertPanel());
+    
+    // Expert panel copy reviewers button
+    document.getElementById('btn-copy-reviewers').addEventListener('click', () => this.copyExpertPanelReviewers());
 
     // Expert suggestion buttons (event delegation)
     document.addEventListener('click', (e) => {
@@ -923,11 +997,17 @@ window.App = {
       return;
     }
 
+    // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+    const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
     let html = `
       <div class="expert-results-header">
         <span>Recommended Reviewers:</span>
-        <button class="expert-toggle-btn" onclick="app.toggleExpertResults(${prNumber})" title="Hide recommendations">
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>
+        <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+          </svg>
         </button>
       </div>
       <div class="expert-suggestions">
@@ -935,6 +1015,7 @@ window.App = {
 
     experts.forEach(expert => {
       const scoreClass = this.getExpertScoreClass(expert.score);
+      const expertiseInfo = typeof expert.expertise === 'object' ? expert.expertise : {short: expert.expertise, full: expert.expertise};
       html += `
         <div class="expert-suggestion">
           <a href="https://github.com/${expert.author}" target="_blank" class="expert-github-link" title="View GitHub profile">
@@ -942,7 +1023,7 @@ window.App = {
           </a>
           <span class="expert-name">${expert.author}</span>
           <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
-          <span class="expert-description">${expert.expertise}</span>
+          <span class="expert-description" title="${expertiseInfo.full}">${expertiseInfo.short}</span>
         </div>
       `;
     });
@@ -950,6 +1031,138 @@ window.App = {
     html += '</div>';
     expertRow.innerHTML = html;
     expertRow.classList.remove('hidden');
+
+    // 绑定复制按钮事件
+    this.bindCopyReviewersEvents();
+  },
+
+  // 绑定复制reviewer按钮事件
+  bindCopyReviewersEvents() {
+    const copyButtons = document.querySelectorAll('.copy-reviewers-btn');
+    copyButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const reviewers = button.getAttribute('data-reviewers');
+        this.copyReviewers(reviewers, button);
+      });
+    });
+  },
+
+  // 复制reviewer列表到剪贴板
+  copyReviewers(reviewers, button) {
+    if (!reviewers) return;
+
+    // 复制到剪贴板
+    navigator.clipboard.writeText(reviewers).then(() => {
+      // 显示复制成功反馈
+      const originalHTML = button.innerHTML;
+      button.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+      button.title = 'Copied!';
+      
+      // 2秒后恢复原始状态
+      setTimeout(() => {
+        button.innerHTML = originalHTML;
+        button.title = 'Copy reviewers for comment';
+      }, 2000);
+    }).catch(err => {
+      console.error('Failed to copy reviewers:', err);
+      // 备用方法：使用document.execCommand
+      const textArea = document.createElement('textarea');
+      textArea.value = reviewers;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        
+        // 显示复制成功反馈
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+        button.title = 'Copied!';
+        
+        // 2秒后恢复原始状态
+        setTimeout(() => {
+          button.innerHTML = originalHTML;
+          button.title = 'Copy reviewers for comment';
+        }, 2000);
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Failed to copy reviewers to clipboard');
+      }
+      document.body.removeChild(textArea);
+    });
+  },
+
+  // 复制专家面板中的所有reviewer列表
+  copyExpertPanelReviewers() {
+    const expertList = document.getElementById('expert-list');
+    if (!expertList) return;
+    
+    // 获取所有reviewer名称
+    const reviewerNames = [];
+    const expertSuggestions = expertList.querySelectorAll('.expert-suggestion');
+    
+    expertSuggestions.forEach(suggestion => {
+      const nameElement = suggestion.querySelector('.expert-name');
+      if (nameElement) {
+        const name = nameElement.textContent.trim();
+        if (name) {
+          reviewerNames.push(`@${name}`);
+        }
+      }
+    });
+    
+    if (reviewerNames.length === 0) {
+      alert('No reviewers found to copy');
+      return;
+    }
+    
+    // 格式化为"@user1 @user2 @user3"
+    const reviewerList = reviewerNames.join(' ');
+    
+    // 复制到剪贴板
+    navigator.clipboard.writeText(reviewerList).then(() => {
+      // 显示复制成功反馈
+      const copyBtn = document.getElementById('btn-copy-reviewers');
+      if (copyBtn) {
+        const originalHTML = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+        copyBtn.title = 'Copied!';
+        
+        // 2秒后恢复原始状态
+        setTimeout(() => {
+          copyBtn.innerHTML = originalHTML;
+          copyBtn.title = 'Copy reviewers for comment';
+        }, 2000);
+      }
+    }).catch(err => {
+      console.error('Failed to copy reviewers:', err);
+      // 备用方法：使用document.execCommand
+      const textArea = document.createElement('textarea');
+      textArea.value = reviewerList;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        
+        // 显示复制成功反馈
+        const copyBtn = document.getElementById('btn-copy-reviewers');
+        if (copyBtn) {
+          const originalHTML = copyBtn.innerHTML;
+          copyBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+          copyBtn.title = 'Copied!';
+          
+          // 2秒后恢复原始状态
+          setTimeout(() => {
+            copyBtn.innerHTML = originalHTML;
+            copyBtn.title = 'Copy reviewers for comment';
+          }, 2000);
+        }
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Failed to copy reviewers to clipboard');
+      }
+      document.body.removeChild(textArea);
+    });
   },
 
   // 切换专家推荐结果的显示/隐藏
@@ -1017,7 +1230,9 @@ window.App = {
 
     this.isLoading = true;
     const btn = document.querySelector(`.expert-btn[data-pr="${prNumber}"]`);
+    let originalHTML = '';
     if (btn) {
+      originalHTML = btn.innerHTML;
       btn.disabled = true;
       btn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/><path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>';
     }
@@ -1038,8 +1253,11 @@ window.App = {
       const expertList = document.getElementById('expert-list');
       expertList.innerHTML = `<div class="empty-state">Failed to get expert recommendations for PR #${prNumber}: ${error.message}</div>`;
     } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHTML;
+      this.isLoading = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+      }
     }
   },
 
@@ -1056,11 +1274,20 @@ window.App = {
     const pr = this.currentPRs.find(p => p.number === prNumber);
     if (!pr) return;
 
+    // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+    const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
     let html = `
       <div class="expert-pr-item">
         <div class="expert-pr-header">
           <span class="expert-pr-title">PR #${prNumber}</span>
           <span class="expert-pr-number">${escapeHtml(pr.title)}</span>
+          <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+            </svg>
+          </button>
         </div>
         <div class="expert-suggestions">
     `;
@@ -1083,6 +1310,9 @@ window.App = {
     `;
 
     expertList.innerHTML = html;
+    
+    // 绑定复制按钮事件
+    this.bindCopyReviewersEvents();
   },
 
   // 更新专家推荐面板
@@ -1101,11 +1331,20 @@ window.App = {
       const experts = expertResults[pr.number] || [];
       if (experts.length === 0) return;
 
+      // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+      const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
       html += `
         <div class="expert-pr-item">
           <div class="expert-pr-header">
             <span class="expert-pr-title">PR #${pr.number}</span>
             <span class="expert-pr-number">${pr.title}</span>
+            <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+              </svg>
+            </button>
           </div>
           <div class="expert-suggestions">
       `;
@@ -1293,7 +1532,8 @@ window.App = {
         : this.currentState === 'closed' ? stats.closed
         : stats.open;
       this.currentTotalCount = stateCount || 0;
-      Renderer.renderPagination(this.currentPage, this.currentPage * CONFIG.PER_PAGE < this.currentTotalCount, this.currentTotalCount);
+      const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+      await Renderer.renderPagination(this.currentPage, this.currentPage * userPerPage < this.currentTotalCount, this.currentTotalCount);
     } catch (err) {
       console.error('Failed to load stats:', err);
       Renderer.showStatus(`Stats error: ${err.message}`, true);
@@ -1311,17 +1551,19 @@ window.App = {
     document.getElementById('ci-filter-select').value = 'all';
 
     try {
+      const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
       const prs = await GitHubAPI.getPRList(this.repo, {
         state: this.currentState,
         page: this.currentPage,
         sort: this.currentSort,
         direction: this.currentDirection,
         author: this.currentAuthor,
+        perPage: userPerPage,
       });
 
       this.currentPRs = prs;
       Renderer.renderPRList(prs);
-      Renderer.renderPagination(this.currentPage, prs.length >= CONFIG.PER_PAGE, this.currentTotalCount);
+      await Renderer.renderPagination(this.currentPage, prs.length >= userPerPage, this.currentTotalCount);
 
       // Async load CI statuses and unresolved CR counts
       if (prs.length > 0) {
@@ -1626,10 +1868,10 @@ const ExpertRecommender = {
   // 生成专家描述
   getExpertiseDescription(expert, totalFiles) {
     const coverage = Math.round((expert.fileCount / totalFiles) * 100);
-    if (coverage >= 80) return 'Primary expert';
-    if (coverage >= 50) return 'Key contributor';
-    if (expert.totalCommits > 10) return 'Experienced contributor';
-    return 'Occasional contributor';
+    if (coverage >= 80) return {short: 'PE', full: 'Primary expert'};
+    if (coverage >= 50) return {short: 'KC', full: 'Key contributor'};
+    if (expert.totalCommits > 10) return {short: 'EC', full: 'Experienced contributor'};
+    return {short: 'OC', full: 'Occasional contributor'};
   },
 
   // 批量获取多个PR的专家推荐

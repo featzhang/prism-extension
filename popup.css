@@ -698,6 +698,34 @@ body {
   flex-shrink: 0;
 }
 
+.page-size-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.page-size-select {
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.page-size-select:hover {
+  border-color: #a8b1ba;
+}
+
+.page-size-select:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
 .page-btn {
   padding: 4px 10px;
   border: 1px solid var(--border-color);
@@ -990,7 +1018,30 @@ body {
 .expert-toggle-btn svg {
   width: 12px;
   height: 12px;
-  transition: transform 0.2s;
+}
+
+.copy-reviewers-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.copy-reviewers-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.copy-reviewers-btn svg {
+  width: 12px;
+  height: 12px;
+}  transition: transform 0.2s;
 }
 
 .expert-toggle-btn:hover svg {
