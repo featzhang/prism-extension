@@ -88,6 +88,25 @@ const Storage = {
       chrome.storage.local.remove(['gh_token', 'username', 'gh_login_error'], resolve);
     });
   },
+
+  async getUserConfig(key, defaultValue) {
+    return new Promise(resolve => {
+      chrome.storage.local.get('userConfig', result => {
+        const config = result.userConfig || {};
+        resolve(config[key] !== undefined ? config[key] : defaultValue);
+      });
+    });
+  },
+
+  async setUserConfig(key, value) {
+    return new Promise(resolve => {
+      chrome.storage.local.get('userConfig', result => {
+        const config = result.userConfig || {};
+        config[key] = value;
+        chrome.storage.local.set({ userConfig: config }, resolve);
+      });
+    });
+  },
 };
 
 // ===== GITHUB API =====
