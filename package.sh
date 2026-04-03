@@ -24,6 +24,7 @@ zip -r "dist/$ZIP_NAME" \
   popup.js \
   popup.css \
   icons/ \
+  modules/ \
   -x "*.DS_Store" "*.git*" "dist/*" "package.sh"
 
 echo "Package created: dist/$ZIP_NAME"
