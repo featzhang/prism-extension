@@ -137,6 +137,16 @@
 
   <!-- Pagination -->
   <footer class="pagination" id="pagination">
+    <div class="page-size-control">
+      <label for="page-size-select">Show:</label>
+      <select id="page-size-select" class="page-size-select">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
     <button id="btn-prev" class="page-btn" disabled>← Prev</button>
     <span id="page-info" class="page-info">Page 1</span>
     <button id="btn-next" class="page-btn" disabled>Next →</button>

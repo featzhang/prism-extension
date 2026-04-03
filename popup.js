@@ -2,7 +2,7 @@
 
 // ===== CONFIG =====
 const CONFIG = {
-  PER_PAGE: 20,
+  DEFAULT_PER_PAGE: 10,
   CONCURRENT: 4,
   TTL_STATS: 10 * 60 * 1000,   // 10 minutes
   TTL_PRS: 5 * 60 * 1000,      // 5 minutes
@@ -169,8 +169,8 @@ const GitHubAPI = {
     }
   },
 
-  async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '' } = {}) {
-    const cacheKey = `cache_prs_${repo}_${state}_${sort}_${direction}_p${page}_a${author}`;
+  async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '', perPage = CONFIG.DEFAULT_PER_PAGE } = {}) {
+    const cacheKey = `cache_prs_${repo}_${state}_${sort}_${direction}_p${page}_a${author}_pp${perPage}`;
     const cached = await Storage.getCache(cacheKey);
     if (cached) return cached;
 
@@ -180,13 +180,13 @@ const GitHubAPI = {
       const stateQ = state === 'merged' ? 'is:merged' : (state === 'all' ? '' : `is:${state}`);
       const q = `repo:${repo}+is:pr+author:${encodeURIComponent(author)}${stateQ ? '+' + stateQ : ''}`;
       const sortParam = sort === 'updated' ? 'updated' : 'created';
-      const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${CONFIG.PER_PAGE}`;
+      const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${perPage}`;
       const result = await this.fetch(url);
       prs = result.items;
       // Search API returns issues; map pull_request field presence is guaranteed for is:pr
     } else {
       const apiState = state === 'all' ? 'all' : (state === 'merged' ? 'closed' : state);
-      const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${CONFIG.PER_PAGE}&sort=${sort}&direction=${direction}`;
+      const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${perPage}&sort=${sort}&direction=${direction}`;
       prs = await this.fetch(url);
       if (state === 'merged') {
         prs = prs.filter(pr => pr.merged_at != null);
@@ -723,8 +723,9 @@ const Renderer = {
     if (el) el.textContent = total.toLocaleString();
   },
 
-  renderPagination(page, hasMore, totalCount) {
-    const totalPages = totalCount > 0 ? Math.ceil(totalCount / CONFIG.PER_PAGE) : (hasMore ? '?' : page);
+  async renderPagination(page, hasMore, totalCount) {
+    const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / userPerPage) : (hasMore ? '?' : page);
     document.getElementById('page-info').textContent = `Page ${page} / ${totalPages}`;
     document.getElementById('btn-prev').disabled = page <= 1;
     document.getElementById('btn-next').disabled = !hasMore;
@@ -764,6 +765,13 @@ window.App = {
     
     // 初始化项目选择下拉框
     this.initRepoSelect();
+    
+    // 初始化分页大小选择
+    const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+    const pageSizeSelect = document.getElementById('page-size-select');
+    if (pageSizeSelect) {
+      pageSizeSelect.value = userPerPage;
+    }
     
     this.renderAuthState();
     this.bindEvents();
@@ -853,6 +861,15 @@ window.App = {
       const [sort, dir] = e.target.value.split('-');
       this.currentSort = sort;
       this.currentDirection = dir;
+      this.currentPage = 1;
+      this.loadPRs();
+    });
+
+    // Page size control
+    document.getElementById('page-size-select').addEventListener('change', async e => {
+      if (this.isLoading) return;
+      const perPage = parseInt(e.target.value);
+      await Storage.setUserConfig('perPage', perPage);
       this.currentPage = 1;
       this.loadPRs();
     });
@@ -1331,7 +1348,7 @@ window.App = {
         : this.currentState === 'closed' ? stats.closed
         : stats.open;
       this.currentTotalCount = stateCount || 0;
-      Renderer.renderPagination(this.currentPage, this.currentPage * CONFIG.PER_PAGE < this.currentTotalCount, this.currentTotalCount);
+      await Renderer.renderPagination(this.currentPage, this.currentPage * userPerPage < this.currentTotalCount, this.currentTotalCount);
     } catch (err) {
       console.error('Failed to load stats:', err);
       Renderer.showStatus(`Stats error: ${err.message}`, true);
@@ -1349,17 +1366,19 @@ window.App = {
     document.getElementById('ci-filter-select').value = 'all';
 
     try {
+      const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
       const prs = await GitHubAPI.getPRList(this.repo, {
         state: this.currentState,
         page: this.currentPage,
         sort: this.currentSort,
         direction: this.currentDirection,
         author: this.currentAuthor,
+        perPage: userPerPage,
       });
 
       this.currentPRs = prs;
       Renderer.renderPRList(prs);
-      Renderer.renderPagination(this.currentPage, prs.length >= CONFIG.PER_PAGE, this.currentTotalCount);
+      await Renderer.renderPagination(this.currentPage, prs.length >= userPerPage, this.currentTotalCount);
 
       // Async load CI statuses and unresolved CR counts
       if (prs.length > 0) {
