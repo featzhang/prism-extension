@@ -961,15 +961,13 @@ window.App = {
     let html = `
       <div class="expert-results-header">
         <span>Recommended Reviewers:</span>
-        <button class="expert-toggle-btn" onclick="app.toggleExpertResults(${prNumber})" title="Hide recommendations">
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/></svg>
-        </button>
       </div>
       <div class="expert-suggestions">
     `;
 
     experts.forEach(expert => {
       const scoreClass = this.getExpertScoreClass(expert.score);
+      const expertiseInfo = typeof expert.expertise === 'object' ? expert.expertise : {short: expert.expertise, full: expert.expertise};
       html += `
         <div class="expert-suggestion">
           <a href="https://github.com/${expert.author}" target="_blank" class="expert-github-link" title="View GitHub profile">
@@ -977,7 +975,7 @@ window.App = {
           </a>
           <span class="expert-name">${expert.author}</span>
           <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
-          <span class="expert-description">${expert.expertise}</span>
+          <span class="expert-description" title="${expertiseInfo.full}">${expertiseInfo.short}</span>
         </div>
       `;
     });
@@ -1052,7 +1050,9 @@ window.App = {
 
     this.isLoading = true;
     const btn = document.querySelector(`.expert-btn[data-pr="${prNumber}"]`);
+    let originalHTML = '';
     if (btn) {
+      originalHTML = btn.innerHTML;
       btn.disabled = true;
       btn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/><path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>';
     }
@@ -1073,8 +1073,11 @@ window.App = {
       const expertList = document.getElementById('expert-list');
       expertList.innerHTML = `<div class="empty-state">Failed to get expert recommendations for PR #${prNumber}: ${error.message}</div>`;
     } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHTML;
+      this.isLoading = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+      }
     }
   },
 
@@ -1661,10 +1664,10 @@ const ExpertRecommender = {
   // 生成专家描述
   getExpertiseDescription(expert, totalFiles) {
     const coverage = Math.round((expert.fileCount / totalFiles) * 100);
-    if (coverage >= 80) return 'Primary expert';
-    if (coverage >= 50) return 'Key contributor';
-    if (expert.totalCommits > 10) return 'Experienced contributor';
-    return 'Occasional contributor';
+    if (coverage >= 80) return {short: 'PE', full: 'Primary expert'};
+    if (coverage >= 50) return {short: 'KC', full: 'Key contributor'};
+    if (expert.totalCommits > 10) return {short: 'EC', full: 'Experienced contributor'};
+    return {short: 'OC', full: 'Occasional contributor'};
   },
 
   // 批量获取多个PR的专家推荐
