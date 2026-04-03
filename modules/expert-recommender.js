@@ -62,9 +62,17 @@ class ExpertRecommender {
         throw new Error(rateLimitStatus.message);
       }
       
-      if (rateLimitStatus.status === 'low' && rateLimitStatus.remaining < 5) {
-        // If very low, suggest waiting
-        throw new Error(`${rateLimitStatus.message} Consider waiting for the limit to reset.`);
+      // More aggressive rate limiting for expert recommendations
+      if (rateLimitStatus.status === 'low' && rateLimitStatus.remaining < 10) {
+        throw new Error(`${rateLimitStatus.message} Expert recommendations require multiple API calls. Please wait or use a GitHub token.`);
+      }
+      
+      // Check if we have cached results for this PR
+      const cacheKey = `cache_experts_${repo}_${prNumber}`;
+      const cached = await this.storage.getCache(cacheKey);
+      if (cached) {
+        console.log(`Using cached expert recommendations for PR #${prNumber}`);
+        return cached;
       }
       
       // Get PR changed files list
@@ -97,12 +105,20 @@ class ExpertRecommender {
         return [];
       }
       
-      // Limit the number of files to analyze to avoid rate limits
-      const maxFilesToAnalyze = rateLimitStatus.status === 'low' ? 10 : 20;
+      // More conservative file analysis limits based on rate limit status
+      let maxFilesToAnalyze;
+      if (rateLimitStatus.status === 'low') {
+        maxFilesToAnalyze = 5; // Very conservative when rate limit is low
+      } else if (rateLimitStatus.remaining < 30) {
+        maxFilesToAnalyze = 8; // Conservative when approaching limit
+      } else {
+        maxFilesToAnalyze = 15; // Normal limit
+      }
+      
       const filesToAnalyze = allFiles.slice(0, maxFilesToAnalyze);
       
       if (allFiles.length > maxFilesToAnalyze) {
-        console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} to avoid rate limits`);
+        console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} due to rate limits`);
       }
       
       // Get contributors for each file with rate limiting
@@ -110,9 +126,9 @@ class ExpertRecommender {
       for (let i = 0; i < filesToAnalyze.length; i++) {
         const file = filesToAnalyze[i];
         
-        // Add delay between API calls based on rate limit status
+        // Add delay between API calls to respect rate limits
         if (i > 0) {
-          const delay = rateLimitStatus.status === 'low' ? 500 : 200;
+          const delay = rateLimitStatus.status === 'low' ? 1000 : 500; // Longer delays when rate limit is low
           await new Promise(resolve => setTimeout(resolve, delay));
         }
         
@@ -173,7 +189,7 @@ class ExpertRecommender {
       });
 
       // Sort by score and return top 5 experts
-      return experts
+      const finalExperts = experts
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
         .map(expert => ({
@@ -181,6 +197,12 @@ class ExpertRecommender {
           score: Math.round(expert.score),
           expertise: this.getExpertiseDescription(expert, fileExperts.length)
         }));
+
+      // Cache the results to avoid repeated API calls
+      await this.storage.setCache(cacheKey, finalExperts, CONFIG.TTL_COMMENTS);
+      console.log(`Cached expert recommendations for PR #${prNumber}`);
+      
+      return finalExperts;
 
     } catch (error) {
       console.error(`Failed to suggest experts for PR #${prNumber}:`, error.message);

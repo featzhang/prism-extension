@@ -391,12 +391,20 @@ class PRismApp {
     if (errorMessage.includes('rate limit') || errorMessage.includes('Rate limit')) {
       detailedMessage += `
       <div class="rate-limit-solutions">
+        <strong>Why expert recommendations use more API calls:</strong>
+        <p>Expert analysis requires multiple API calls to analyze file history and contributors.</p>
+        
         <strong>Solutions:</strong>
         <ul>
           <li>Wait for the rate limit to reset (usually 1 hour)</li>
           <li>Use a GitHub Personal Access Token for 5000 requests/hour</li>
           <li>Configure token in extension settings</li>
+          <li>Try again later when the limit resets</li>
         </ul>
+        
+        <div class="api-usage-info">
+          <small>Note: Expert recommendations analyze file history and can use 10-20+ API calls per PR.</small>
+        </div>
       </div>
       `;
     }
