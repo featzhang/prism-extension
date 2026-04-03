@@ -1018,7 +1018,30 @@ body {
 .expert-toggle-btn svg {
   width: 12px;
   height: 12px;
-  transition: transform 0.2s;
+}
+
+.copy-reviewers-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.copy-reviewers-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.copy-reviewers-btn svg {
+  width: 12px;
+  height: 12px;
+}  transition: transform 0.2s;
 }
 
 .expert-toggle-btn:hover svg {

@@ -924,6 +924,9 @@ window.App = {
 
     // Expert recommendation
     document.getElementById('btn-close-experts').addEventListener('click', () => this.hideExpertPanel());
+    
+    // Expert panel copy reviewers button
+    document.getElementById('btn-copy-reviewers').addEventListener('click', () => this.copyExpertPanelReviewers());
 
     // Expert suggestion buttons (event delegation)
     document.addEventListener('click', (e) => {
@@ -994,9 +997,18 @@ window.App = {
       return;
     }
 
+    // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+    const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
     let html = `
       <div class="expert-results-header">
         <span>Recommended Reviewers:</span>
+        <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+          </svg>
+        </button>
       </div>
       <div class="expert-suggestions">
     `;
@@ -1019,6 +1031,138 @@ window.App = {
     html += '</div>';
     expertRow.innerHTML = html;
     expertRow.classList.remove('hidden');
+
+    // 绑定复制按钮事件
+    this.bindCopyReviewersEvents();
+  },
+
+  // 绑定复制reviewer按钮事件
+  bindCopyReviewersEvents() {
+    const copyButtons = document.querySelectorAll('.copy-reviewers-btn');
+    copyButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const reviewers = button.getAttribute('data-reviewers');
+        this.copyReviewers(reviewers, button);
+      });
+    });
+  },
+
+  // 复制reviewer列表到剪贴板
+  copyReviewers(reviewers, button) {
+    if (!reviewers) return;
+
+    // 复制到剪贴板
+    navigator.clipboard.writeText(reviewers).then(() => {
+      // 显示复制成功反馈
+      const originalHTML = button.innerHTML;
+      button.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+      button.title = 'Copied!';
+      
+      // 2秒后恢复原始状态
+      setTimeout(() => {
+        button.innerHTML = originalHTML;
+        button.title = 'Copy reviewers for comment';
+      }, 2000);
+    }).catch(err => {
+      console.error('Failed to copy reviewers:', err);
+      // 备用方法：使用document.execCommand
+      const textArea = document.createElement('textarea');
+      textArea.value = reviewers;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        
+        // 显示复制成功反馈
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+        button.title = 'Copied!';
+        
+        // 2秒后恢复原始状态
+        setTimeout(() => {
+          button.innerHTML = originalHTML;
+          button.title = 'Copy reviewers for comment';
+        }, 2000);
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Failed to copy reviewers to clipboard');
+      }
+      document.body.removeChild(textArea);
+    });
+  },
+
+  // 复制专家面板中的所有reviewer列表
+  copyExpertPanelReviewers() {
+    const expertList = document.getElementById('expert-list');
+    if (!expertList) return;
+    
+    // 获取所有reviewer名称
+    const reviewerNames = [];
+    const expertSuggestions = expertList.querySelectorAll('.expert-suggestion');
+    
+    expertSuggestions.forEach(suggestion => {
+      const nameElement = suggestion.querySelector('.expert-name');
+      if (nameElement) {
+        const name = nameElement.textContent.trim();
+        if (name) {
+          reviewerNames.push(`@${name}`);
+        }
+      }
+    });
+    
+    if (reviewerNames.length === 0) {
+      alert('No reviewers found to copy');
+      return;
+    }
+    
+    // 格式化为"@user1 @user2 @user3"
+    const reviewerList = reviewerNames.join(' ');
+    
+    // 复制到剪贴板
+    navigator.clipboard.writeText(reviewerList).then(() => {
+      // 显示复制成功反馈
+      const copyBtn = document.getElementById('btn-copy-reviewers');
+      if (copyBtn) {
+        const originalHTML = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+        copyBtn.title = 'Copied!';
+        
+        // 2秒后恢复原始状态
+        setTimeout(() => {
+          copyBtn.innerHTML = originalHTML;
+          copyBtn.title = 'Copy reviewers for comment';
+        }, 2000);
+      }
+    }).catch(err => {
+      console.error('Failed to copy reviewers:', err);
+      // 备用方法：使用document.execCommand
+      const textArea = document.createElement('textarea');
+      textArea.value = reviewerList;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        
+        // 显示复制成功反馈
+        const copyBtn = document.getElementById('btn-copy-reviewers');
+        if (copyBtn) {
+          const originalHTML = copyBtn.innerHTML;
+          copyBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+          copyBtn.title = 'Copied!';
+          
+          // 2秒后恢复原始状态
+          setTimeout(() => {
+            copyBtn.innerHTML = originalHTML;
+            copyBtn.title = 'Copy reviewers for comment';
+          }, 2000);
+        }
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Failed to copy reviewers to clipboard');
+      }
+      document.body.removeChild(textArea);
+    });
   },
 
   // 切换专家推荐结果的显示/隐藏
@@ -1130,11 +1274,20 @@ window.App = {
     const pr = this.currentPRs.find(p => p.number === prNumber);
     if (!pr) return;
 
+    // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+    const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
     let html = `
       <div class="expert-pr-item">
         <div class="expert-pr-header">
           <span class="expert-pr-title">PR #${prNumber}</span>
           <span class="expert-pr-number">${escapeHtml(pr.title)}</span>
+          <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+            </svg>
+          </button>
         </div>
         <div class="expert-suggestions">
     `;
@@ -1157,6 +1310,9 @@ window.App = {
     `;
 
     expertList.innerHTML = html;
+    
+    // 绑定复制按钮事件
+    this.bindCopyReviewersEvents();
   },
 
   // 更新专家推荐面板
@@ -1175,11 +1331,20 @@ window.App = {
       const experts = expertResults[pr.number] || [];
       if (experts.length === 0) return;
 
+      // 生成要复制的reviewer列表，格式为"@user1 @user2 @user3"
+      const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
+
       html += `
         <div class="expert-pr-item">
           <div class="expert-pr-header">
             <span class="expert-pr-title">PR #${pr.number}</span>
             <span class="expert-pr-number">${pr.title}</span>
+            <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
+                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>
+              </svg>
+            </button>
           </div>
           <div class="expert-suggestions">
       `;
