@@ -1367,6 +1367,7 @@ window.App = {
         : this.currentState === 'closed' ? stats.closed
         : stats.open;
       this.currentTotalCount = stateCount || 0;
+      const userPerPage = await Storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
       await Renderer.renderPagination(this.currentPage, this.currentPage * userPerPage < this.currentTotalCount, this.currentTotalCount);
     } catch (err) {
       console.error('Failed to load stats:', err);
