@@ -906,7 +906,7 @@ class PRismApp {
           this.loadPRs();
         });
       }
-    }    } finally {
+    } finally {
       this._prLoadInProgress = false;
       this.setLoading(false);
     }
