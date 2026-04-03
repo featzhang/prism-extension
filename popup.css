@@ -1091,7 +1091,7 @@ body {
 .copy-reviewers-btn svg {
   width: 12px;
   height: 12px;
-}  transition: transform 0.2s;
+  transition: transform 0.2s;
 }
 
 .expert-toggle-btn:hover svg {
@@ -1158,4 +1158,35 @@ body {
 
 .hidden {
   display: none !important;
+}
+
+/* ===== Custom Tooltip ===== */
+.custom-tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  z-index: 10000;
+  pointer-events: none;
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  animation: tooltipFadeIn 0.1s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

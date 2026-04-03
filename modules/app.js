@@ -299,7 +299,7 @@ class PRismApp {
           </a>
           <span class="expert-name">${expert.author}</span>
           <span class="expert-score-badge ${scoreClass}">${expert.score}</span>
-          <span class="expert-description" title="${expertiseInfo.full}">${expertiseInfo.short}</span>
+          <span class="expert-description" data-tooltip="${expertiseInfo.full}">${expertiseInfo.short}</span>
         </div>
       `;
     });
@@ -310,6 +310,8 @@ class PRismApp {
 
     // Bind copy button events
     this.bindCopyReviewersEvents();
+    // Bind tooltip events
+    this.bindTooltipEvents();
   }
 
   // Bind copy reviewer button events
@@ -322,6 +324,82 @@ class PRismApp {
         this.copyReviewers(reviewers, button);
       });
     });
+  }
+
+  // Bind tooltip events for expert descriptions
+  bindTooltipEvents() {
+    const tooltipElements = document.querySelectorAll('[data-tooltip]');
+    let tooltipTimeout;
+    let currentTooltip;
+
+    tooltipElements.forEach(element => {
+      // Mouse enter event - show tooltip after short delay
+      element.addEventListener('mouseenter', (e) => {
+        const tooltipText = element.getAttribute('data-tooltip');
+        if (!tooltipText) return;
+
+        // Clear any existing timeout
+        clearTimeout(tooltipTimeout);
+        
+        // Remove existing tooltip
+        if (currentTooltip) {
+          currentTooltip.remove();
+          currentTooltip = null;
+        }
+
+        // Show tooltip after 100ms delay (much faster than browser default)
+        tooltipTimeout = setTimeout(() => {
+          currentTooltip = this.createTooltip(e.clientX, e.clientY, tooltipText);
+        }, 100);
+      });
+
+      // Mouse leave event - hide tooltip
+      element.addEventListener('mouseleave', () => {
+        clearTimeout(tooltipTimeout);
+        if (currentTooltip) {
+          currentTooltip.remove();
+          currentTooltip = null;
+        }
+      });
+
+      // Mouse move event - update tooltip position
+      element.addEventListener('mousemove', (e) => {
+        if (currentTooltip) {
+          this.updateTooltipPosition(currentTooltip, e.clientX, e.clientY);
+        }
+      });
+    });
+  }
+
+  // Create custom tooltip element
+  createTooltip(x, y, text) {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'custom-tooltip';
+    tooltip.textContent = text;
+    tooltip.style.cssText = `
+      position: fixed;
+      left: ${x + 10}px;
+      top: ${y + 10}px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      z-index: 10000;
+      pointer-events: none;
+      max-width: 200px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    `;
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+
+  // Update tooltip position
+  updateTooltipPosition(tooltip, x, y) {
+    tooltip.style.left = `${x + 10}px`;
+    tooltip.style.top = `${y + 10}px`;
   }
 
   // Copy reviewers to clipboard
