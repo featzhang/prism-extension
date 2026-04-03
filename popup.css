@@ -76,7 +76,6 @@ body {
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 36px;
   padding: 0 12px;
   background: var(--bg-secondary);
@@ -169,6 +168,66 @@ body {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ===== Request Counter Styles ===== */
+.header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  margin: 0 16px;
+}
+
+.request-counter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all 0.2s ease;
+  cursor: default;
+  user-select: none;
+}
+
+.request-counter:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.request-counter.warning {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.request-counter.critical {
+  background: rgba(220, 53, 69, 0.15);
+  color: #dc3545;
+  animation: pulse 2s infinite;
+}
+
+.request-count {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.request-label {
+  opacity: 0.8;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(220, 53, 69, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+  }
 }
 
 /* ===== Repo Bar ===== */

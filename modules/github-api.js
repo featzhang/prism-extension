@@ -8,6 +8,8 @@ class GitHubAPI {
   constructor() {
     this._token = '';
     this.storage = new StorageManager();
+    this.requestCount = 0; // Initialize request counter
+    this.lastRequestTime = null; // Track last request time
   }
 
   async fetch(url, retries = 3, delay = 1000) {
@@ -16,6 +18,13 @@ class GitHubAPI {
       'User-Agent': 'Flink-PR-Status-Extension/1.0',
     };
     if (this._token) headers['Authorization'] = `Bearer ${this._token}`;
+
+    // Increment request counter
+    this.requestCount++;
+    this.lastRequestTime = new Date();
+    
+    // Emit request count update event
+    this.emitRequestCountUpdate();
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -66,6 +75,29 @@ class GitHubAPI {
         throw error;
       }
     }
+  }
+
+  // Emit request count update event
+  emitRequestCountUpdate() {
+    const event = new CustomEvent('githubApiRequestCount', {
+      detail: {
+        count: this.requestCount,
+        lastRequestTime: this.lastRequestTime
+      }
+    });
+    window.dispatchEvent(event);
+  }
+
+  // Reset request counter
+  resetRequestCount() {
+    this.requestCount = 0;
+    this.lastRequestTime = null;
+    this.emitRequestCountUpdate();
+  }
+
+  // Get current request count
+  getRequestCount() {
+    return this.requestCount;
   }
 
   async getStats(repo, author = '') {

@@ -28,7 +28,73 @@ class PRismApp {
     this.expertRecommender = new ExpertRecommender();
   }
 
+  // Initialize the application
   async init() {
+    console.log('PRism extension initializing...');
+    
+    // Initialize request counter display
+    this.initRequestCounter();
+    
+    // Load settings and token
+    await this.loadSettings();
+    
+    // Test API connection before loading data
+    try {
+      // Test API with a simple request to verify token
+      await this.github.fetch(`${CONFIG.GITHUB_API}/user`, 1, 1000);
+      console.log('GitHub API connection successful');
+    } catch (error) {
+      console.warn('GitHub API connection test failed:', error.message);
+    }
+    
+    // Load initial data
+    await this.loadInitialData();
+    
+    // Set up event listeners
+    this.setupEventListeners();
+    
+    console.log('PRism extension initialized successfully');
+  }
+
+  // Initialize request counter display
+  initRequestCounter() {
+    this.requestCounter = document.getElementById('request-counter');
+    this.requestCountElement = this.requestCounter.querySelector('.request-count');
+    
+    // Listen for request count updates
+    window.addEventListener('githubApiRequestCount', (event) => {
+      this.updateRequestCounter(event.detail.count);
+    });
+    
+    // Add click handler to reset counter
+    this.requestCounter.addEventListener('click', () => {
+      this.github.resetRequestCount();
+    });
+    
+    // Set initial state
+    this.updateRequestCounter(0);
+  }
+
+  // Update request counter display
+  updateRequestCounter(count) {
+    this.requestCountElement.textContent = count;
+    
+    // Update counter state based on count
+    this.requestCounter.classList.remove('warning', 'critical');
+    
+    if (count >= 50) {
+      this.requestCounter.classList.add('critical');
+    } else if (count >= 30) {
+      this.requestCounter.classList.add('warning');
+    }
+    
+    // Update tooltip with detailed information
+    const lastRequestTime = this.github.lastRequestTime;
+    const timeInfo = lastRequestTime ? `\nLast request: ${lastRequestTime.toLocaleTimeString()}` : '';
+    this.requestCounter.title = `GitHub API Requests: ${count}${timeInfo}\nClick to reset counter`;
+  }
+
+  async loadSettings() {
     try {
       this.repo = await this.storage.getRepo();
       const token = await this.storage.getToken();
@@ -47,33 +113,22 @@ class PRismApp {
       }
       
       this.renderAuthState();
-      this.bindEvents();
-      this.watchAuthStorage();
-      
-      // Test API connection before loading data
-      if (token) {
-        try {
-          // Test API with a simple request to verify token
-          await this.github.fetch(`${CONFIG.GITHUB_API}/user`, 1, 1000);
-        } catch (error) {
-          console.warn('Token validation failed:', error.message);
-          // Clear invalid token and update UI immediately
-          this.github.setToken('');
-          await this.storage.clearAuth();
-          this.currentAuthor = '';
-          this.renderAuthState();
-          // Don't proceed with loading data if token is invalid
-          this.renderer.showStatus('Authentication failed. Please login again.', true);
-          this.setLoading(false);
-          return;
-        }
-      }
-      
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  }
+
+  async loadInitialData() {
+    try {
       await this.loadAll();
     } catch (error) {
-      console.error('App initialization failed:', error);
-      this.renderer.showStatus(`Initialization error: ${error.message}`, true);
+      console.error('Failed to load initial data:', error);
     }
+  }
+
+  setupEventListeners() {
+    this.bindEvents();
+    this.watchAuthStorage();
   }
 
   initRepoSelect() {
