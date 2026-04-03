@@ -25,7 +25,7 @@ class PRismApp {
     this.storage = new StorageManager();
     this.github = new GitHubAPI();
     this.renderer = new Renderer();
-    this.expertRecommender = new ExpertRecommender();
+    this.expertRecommender = new ExpertRecommender(this.github);
   }
 
   // Initialize the application
@@ -346,12 +346,22 @@ class PRismApp {
       return;
     }
 
+    // Check if results are from cache
+    const isFromCache = experts.some(expert => expert.fromCache);
+
     // Generate reviewer list for copying, format: "@user1 @user2 @user3"
     const reviewerList = experts.map(expert => `@${expert.author}`).join(' ');
 
     let html = `
       <div class="expert-results-header">
         <span>Recommended Reviewers:</span>
+        ${isFromCache ? `<span class="cache-badge" title="Results loaded from cache (24h TTL). Click refresh to update.">⚡ Cached</span>` : ''}
+        <button class="refresh-experts-btn" title="Refresh expert recommendations (bypass cache)" data-pr-number="${prNumber}">
+          <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+            <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+          </svg>
+        </button>
         <button class="copy-reviewers-btn" title="Copy reviewers for comment" data-reviewers="${reviewerList}">
           <svg viewBox="0 0 16 16" fill="currentColor">
             <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>
@@ -383,6 +393,8 @@ class PRismApp {
 
     // Bind copy button events
     this.bindCopyReviewersEvents();
+    // Bind refresh experts button events
+    this.bindRefreshExpertsEvents();
     // Bind tooltip events
     this.bindTooltipEvents();
   }
@@ -460,6 +472,35 @@ class PRismApp {
         this.copyReviewers(reviewers, button);
       });
     });
+  }
+
+  // Bind refresh experts button events
+  bindRefreshExpertsEvents() {
+    const refreshButtons = document.querySelectorAll('.refresh-experts-btn');
+    refreshButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prNumber = parseInt(button.getAttribute('data-pr-number'));
+        if (prNumber) {
+          this.refreshExpertsForPR(prNumber);
+        }
+      });
+    });
+  }
+
+  // Refresh expert recommendations for a PR (bypass cache)
+  async refreshExpertsForPR(prNumber) {
+    if (this.isLoading) return;
+
+    // Clear cached data for this PR
+    const cacheKey = `cache_experts_${this.repo}_${prNumber}`;
+    await this.storage.clearCacheByPrefix(cacheKey);
+
+    // Also clear contributor caches to get fresh data
+    await this.storage.clearCacheByPrefix(`cache_contributors_${this.repo}_`);
+
+    // Re-fetch
+    await this.suggestExpertsForSinglePR(prNumber);
   }
 
   // Bind tooltip events for expert descriptions

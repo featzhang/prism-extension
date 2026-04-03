@@ -23,6 +23,10 @@ class GitHubAPI {
     this.requestCount++;
     this.lastRequestTime = new Date();
 
+    // Emit request count update to UI (include rate limit info every 10 requests)
+    const includeRateLimit = this.requestCount % 10 === 0;
+    this.emitRequestCountUpdate(includeRateLimit);
+
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const resp = await fetch(url, { headers });

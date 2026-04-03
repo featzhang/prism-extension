@@ -3,9 +3,11 @@
 const CONFIG = {
   DEFAULT_PER_PAGE: 10,
   CONCURRENT: 4,
-  TTL_STATS: 10 * 60 * 1000,   // 10 minutes
-  TTL_PRS: 5 * 60 * 1000,      // 5 minutes
-  TTL_COMMENTS: 5 * 60 * 1000, // 5 minutes
+  TTL_STATS: 10 * 60 * 1000,       // 10 minutes
+  TTL_PRS: 5 * 60 * 1000,          // 5 minutes
+  TTL_COMMENTS: 5 * 60 * 1000,     // 5 minutes
+  TTL_EXPERTS: 24 * 60 * 60 * 1000, // 24 hours - expert recommendations rarely change
+  TTL_CONTRIBUTORS: 12 * 60 * 60 * 1000, // 12 hours - file contributors rarely change
   DEFAULT_REPO: 'apache/flink',
   GITHUB_API: 'https://api.github.com',
   

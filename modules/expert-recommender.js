@@ -5,9 +5,10 @@ import { StorageManager } from './storage.js';
 import { GitHubAPI } from './github-api.js';
 
 class ExpertRecommender {
-  constructor() {
+  constructor(githubApi) {
     this.storage = new StorageManager();
-    this.github = new GitHubAPI();
+    // Use shared GitHubAPI instance if provided, otherwise create a new one
+    this.github = githubApi || new GitHubAPI();
   }
 
   // Get file contributors
@@ -41,7 +42,7 @@ class ExpertRecommender {
         .map(([author, count]) => ({ author, count, lastCommit: commits[0]?.commit.author.date }))
         .sort((a, b) => b.count - a.count);
 
-      await this.storage.setCache(cacheKey, result, CONFIG.TTL_COMMENTS);
+      await this.storage.setCache(cacheKey, result, CONFIG.TTL_CONTRIBUTORS);
       return result;
     } catch (error) {
       console.warn(`Failed to get contributors for ${filePath}:`, error.message);
@@ -72,7 +73,8 @@ class ExpertRecommender {
       const cached = await this.storage.getCache(cacheKey);
       if (cached) {
         console.log(`Using cached expert recommendations for PR #${prNumber}`);
-        return cached;
+        // Mark results as from cache so UI can show cache indicator
+        return cached.map(expert => ({ ...expert, fromCache: true }));
       }
       
       // Get PR changed files list
@@ -205,9 +207,9 @@ class ExpertRecommender {
           expertise: this.getExpertiseDescription(expert, fileExperts.length)
         }));
 
-      // Cache the results to avoid repeated API calls
-      await this.storage.setCache(cacheKey, finalExperts, CONFIG.TTL_COMMENTS);
-      console.log(`Cached expert recommendations for PR #${prNumber}`);
+      // Cache the results for 24 hours since expert recommendations rarely change
+      await this.storage.setCache(cacheKey, finalExperts, CONFIG.TTL_EXPERTS);
+      console.log(`Cached expert recommendations for PR #${prNumber} (TTL: 24h)`);
       
       return finalExperts;
 
