@@ -8,7 +8,7 @@ import { GitHubAPI } from './modules/github-api.js';
 import { CIParser } from './modules/ci-parser.js';
 import { Renderer } from './modules/renderer.js';
 import { ExpertRecommender } from './modules/expert-recommender.js';
-import { App } from './modules/app.js';
+import { PRismApp } from './modules/app.js';
 
 // 全局变量声明（用于向后兼容）
 window.CONFIG = CONFIG;
@@ -17,12 +17,14 @@ window.GitHubAPI = GitHubAPI;
 window.CIParser = CIParser;
 window.Renderer = Renderer;
 window.ExpertRecommender = ExpertRecommender;
-window.App = App;
+window.App = PRismApp;
 
-// 应用程序初始化
+// 创建应用实例并初始化
+const app = new PRismApp();
+
 document.addEventListener('DOMContentLoaded', () => {
-    App.init().catch(err => {
+    app.init().catch(err => {
         console.error('App init failed:', err);
-        Renderer.showStatus(`Init error: ${err.message}`, true);
+        app.renderer.showStatus(`Init error: ${err.message}`, true);
     });
 });

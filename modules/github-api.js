@@ -34,7 +34,10 @@ class GitHubAPI {
           // Clear token if authentication failed
           if (resp.status === 401) {
             this._token = '';
-            chrome.storage.local.remove('gh_token');
+            // Use callback to avoid async issues
+            chrome.storage.local.remove('gh_token', () => {
+              console.log('Invalid token cleared from storage');
+            });
           }
           
           throw new Error(errorMsg);

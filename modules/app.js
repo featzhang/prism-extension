@@ -57,11 +57,15 @@ class PRismApp {
           await this.github.fetch(`${CONFIG.GITHUB_API}/user`, 1, 1000);
         } catch (error) {
           console.warn('Token validation failed:', error.message);
-          // Clear invalid token
+          // Clear invalid token and update UI immediately
           this.github.setToken('');
           await this.storage.clearAuth();
           this.currentAuthor = '';
           this.renderAuthState();
+          // Don't proceed with loading data if token is invalid
+          this.renderer.showStatus('Authentication failed. Please login again.', true);
+          this.setLoading(false);
+          return;
         }
       }
       
@@ -735,11 +739,19 @@ class PRismApp {
       if (area !== 'local') return;
 
       if (changes.gh_token || changes.username) {
+        // Wait a short time to ensure both token and username are set
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const newToken = await this.storage.getToken();
         const newUsername = await this.storage.getUsername();
         
-        // Only update if values actually changed
-        if (newToken !== this.github._token || newUsername !== this.currentAuthor) {
+        // Only update if we have both token and username (login success)
+        // or if we're clearing both (logout)
+        const hasValidLogin = newToken && newUsername;
+        const isLogout = !newToken && !newUsername;
+        
+        if ((hasValidLogin || isLogout) && 
+            (newToken !== this.github._token || newUsername !== this.currentAuthor)) {
           this.github.setToken(newToken);
           this.currentAuthor = newUsername;
           this.renderAuthState();
