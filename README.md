@@ -5,6 +5,7 @@ A Chrome side panel extension for open source contributors to monitor Apache Fli
 ![Chrome](https://img.shields.io/badge/Chrome-114+-blue?logo=googlechrome)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+![Version](https://img.shields.io/badge/Version-1.0.2-brightgreen)
 
 ## Features
 
@@ -12,18 +13,28 @@ A Chrome side panel extension for open source contributors to monitor Apache Fli
 - **PR statistics** — live Open / Closed / Merged / Total counts for the selected repository
 - **Unresolved CR count** — total number of unresolved review threads across the current PR list (requires login)
 - **Click to filter** — click any stat card to switch the PR list to that state
+- **All-repos summary** — aggregated Open / Done / CR counts across all configured repositories
 
 ### PR List
 - **State filter** — filter by Open, Closed, or All
-- **CI filter** — filter by Azure CI result: Pass, Fail, Pending, or Unknown
+- **CI filter** — filter by CI result: Pass, Fail, Pending, or Unknown (auto-detects Azure CI or GitHub Actions)
 - **Author filter** — filter PRs and stats by GitHub username; defaults to the logged-in user
 - **Sort** — sort by Newest, Oldest, Recently updated, or Least updated
-- **Pagination** — navigate pages with total page count displayed
+- **Page size** — configurable items per page
+- **Pagination** — navigate pages with ← → arrows and total page count displayed
 - **Jira linking** — `[FLINK-XXXXX]` prefixes in PR titles link directly to the Apache Jira issue
 - **PR title link** — click the title text to open the PR on GitHub
 - **Author link** — click the author username to open their GitHub profile
-- **Azure CI status** — parsed from flinkbot comments, shown inline as Pass / Fail / Pending badge with a direct link to the Azure Pipelines build
+- **CI status** — parsed from flinkbot comments or GitHub Actions, shown inline as Pass / Fail / Pending badge with a direct link to the build
 - **Unresolved CR badge** — per-PR count of unresolved review threads (requires login)
+
+### Expert Reviewer Recommendations
+- **Per-PR analysis** — click the expert button on any PR to get reviewer suggestions based on file history and contributors
+- **Scoring system** — each recommended reviewer is scored and color-coded (high / medium / low)
+- **Copy reviewers** — one-click copy all recommended reviewers as `@user1 @user2 @user3` for PR comments
+- **Smart caching** — expert recommendations cached for 24 hours, file contributors cached for 12 hours
+- **Cache indicator** — ⚡ Cached badge shown when results are served from cache
+- **Refresh button** — bypass cache and re-fetch fresh recommendations on demand
 
 ### Authentication
 - **GitHub OAuth login** — one-click login via Device Flow; no manual token or password required
@@ -32,14 +43,22 @@ A Chrome side panel extension for open source contributors to monitor Apache Fli
 
 ### General
 - **Side panel** — lives in the browser sidebar; stays open while you navigate between tabs
-- **Settings** — configure the target repository (`owner/repo` format) via the settings page
-- **Cache** — API responses are cached locally (stats: 10 min, PR list: 5 min, CI/CR: 5 min)
+- **Multi-repo support** — switch between preset Apache Flink repositories or add custom repos in settings
+- **Settings** — configure the target repository (`owner/repo` format) and custom repo list via the settings page
+- **Smart cache** — tiered caching strategy:
+  - Stats: 10 minutes
+  - PR list: 5 minutes
+  - CI / CR comments: 5 minutes
+  - File contributors: 12 hours
+  - Expert recommendations: 24 hours
+- **API request counter** — real-time display of GitHub API calls made, with rate limit status tooltip
+- **Error handling** — graceful handling of rate limits, auth failures, and network errors with actionable guidance
 
 ## Installation
 
 ### From zip (recommended)
 
-1. Download the latest `prism.zip` from [Releases](https://github.com/featzhang/prism-extension/releases)
+1. Download the latest `prism-extension-v*.zip` from [Releases](https://github.com/featzhang/prism-extension/releases)
 2. Unzip the file
 3. Open `chrome://extensions/`
 4. Enable **Developer mode** (toggle in the top right)
@@ -66,22 +85,43 @@ Then follow steps 3–5 above, selecting the cloned folder.
 5. Click `[FLINK-XXXXX]` in a PR title to open the Jira issue; click the rest of the title to open the PR
 6. Click an author name to open their GitHub profile
 7. Click a stat card in the dashboard to switch the list to that state
-8. Click the refresh icon to clear all caches and reload
+8. Click the 👤 expert button on a PR to get reviewer recommendations
+9. Click the refresh icon to clear all caches and reload
 
 ## Development
 
-No build step required — plain HTML, CSS, and JS.
+No build step required — plain HTML, CSS, and ES modules.
+
+### Project Structure
 
 ```
 prism-extension/
-├── manifest.json      # MV3 manifest
-├── background.js      # Service worker: side panel trigger, GitHub Device Flow OAuth
-├── popup.html         # Side panel UI
-├── popup.js           # App logic (API, rendering, state management)
-├── popup.css          # Styles
-├── options.html       # Settings page UI
-├── options.js         # Settings logic
-└── icons/             # Extension icons (16, 48, 128px)
+├── manifest.json              # MV3 manifest
+├── background.js              # Service worker: side panel trigger, GitHub Device Flow OAuth
+├── popup.html                 # Side panel UI
+├── popup.js                   # Entry point, imports PRismApp
+├── popup.css                  # Styles
+├── options.html               # Settings page UI
+├── options.js                 # Settings logic
+├── icons/                     # Extension icons (16, 48, 128px)
+├── modules/
+│   ├── app.js                 # Main application (PRismApp class)
+│   ├── config.js              # Configuration constants (repos, TTLs, API URLs)
+│   ├── github-api.js          # GitHub API client with auth, retry, rate limit tracking
+│   ├── renderer.js            # DOM rendering (stats, PR list, pagination, CI badges)
+│   ├── storage.js             # Chrome storage wrapper with TTL-based caching
+│   ├── expert-recommender.js  # Expert reviewer recommendation engine
+│   ├── ci-parser.js           # CI status parser (Azure CI + GitHub Actions)
+│   └── utils.js               # Shared utility functions
+├── package.sh                 # Build script for release zip
+└── README.md
+```
+
+### Building
+
+```bash
+bash package.sh
+# Output: dist/prism-extension-v<version>.zip
 ```
 
 After editing any file, go to `chrome://extensions/` and click the refresh icon on the PRism card to reload.
