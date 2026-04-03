@@ -16,6 +16,12 @@
       </svg>
       <span class="app-title">PRism</span>
     </div>
+    <div class="header-center">
+      <div id="request-counter" class="request-counter" title="GitHub API Requests">
+        <span class="request-count">0</span>
+        <span class="request-label">requests</span>
+      </div>
+    </div>
     <div class="header-right">
       <span id="auth-user" class="auth-user" style="display:none"></span>
       <button id="btn-login" class="login-btn">Login</button>
@@ -153,11 +159,11 @@
         <option value="100">100</option>
       </select>
     </div>
-    <button id="btn-prev" class="page-btn" disabled>← Prev</button>
+    <button id="btn-prev" class="page-btn" disabled>←</button>
     <span id="page-info" class="page-info">Page 1</span>
-    <button id="btn-next" class="page-btn" disabled>Next →</button>
+    <button id="btn-next" class="page-btn" disabled>→</button>
   </footer>
 
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>

@@ -76,7 +76,6 @@ body {
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 36px;
   padding: 0 12px;
   background: var(--bg-secondary);
@@ -169,6 +168,66 @@ body {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ===== Request Counter Styles ===== */
+.header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  margin: 0 16px;
+}
+
+.request-counter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all 0.2s ease;
+  cursor: default;
+  user-select: none;
+}
+
+.request-counter:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.request-counter.warning {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.request-counter.critical {
+  background: rgba(220, 53, 69, 0.15);
+  color: #dc3545;
+  animation: pulse 2s infinite;
+}
+
+.request-count {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.request-label {
+  opacity: 0.8;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(220, 53, 69, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+  }
 }
 
 /* ===== Repo Bar ===== */
@@ -354,6 +413,56 @@ body {
   padding: 32px;
   text-align: center;
   color: var(--text-muted);
+}
+
+.error-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.error-state svg {
+  color: var(--color-failure);
+  opacity: 0.7;
+}
+
+.error-state h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.error-state p {
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 250px;
+}
+
+.retry-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.retry-btn:hover {
+  background: var(--bg-hover);
+  border-color: #a8b1ba;
+}
+
+.retry-btn:active {
+  transform: scale(0.95);
 }
 
 .pr-item {
@@ -993,11 +1102,49 @@ body {
 .expert-results-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   margin-bottom: 6px;
   font-weight: 600;
   font-size: 12px;
   color: var(--text-primary);
+}
+
+.expert-results-header > span:first-child {
+  flex: 1;
+}
+
+.cache-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  background: var(--color-merged);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.refresh-experts-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.refresh-experts-btn:hover {
+  color: var(--color-open);
+}
+
+.refresh-experts-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 .expert-toggle-btn {
@@ -1041,7 +1188,7 @@ body {
 .copy-reviewers-btn svg {
   width: 12px;
   height: 12px;
-}  transition: transform 0.2s;
+  transition: transform 0.2s;
 }
 
 .expert-toggle-btn:hover svg {
@@ -1108,4 +1255,93 @@ body {
 
 .hidden {
   display: none !important;
+}
+
+/* ===== Custom Tooltip ===== */
+.custom-tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  z-index: 10000;
+  pointer-events: none;
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  animation: tooltipFadeIn 0.1s ease-out;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== Expert Error State ===== */
+.expert-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #fff3f3;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  color: #d32f2f;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.expert-error .error-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #d32f2f;
+}
+
+.expert-error span {
+  line-height: 1.4;
+}
+
+/* ===== Rate Limit Solutions ===== */
+.rate-limit-solutions {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.rate-limit-solutions strong {
+  color: #fff;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.rate-limit-solutions ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.rate-limit-solutions li {
+  margin: 2px 0;
+  line-height: 1.3;
+}
+
+.error-content {
+  flex: 1;
+}
+
+.error-message {
+  margin-bottom: 4px;
 }
