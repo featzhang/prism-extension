@@ -1190,3 +1190,28 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ===== Expert Error State ===== */
+.expert-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #fff3f3;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  color: #d32f2f;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.expert-error .error-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #d32f2f;
+}
+
+.expert-error span {
+  line-height: 1.4;
+}

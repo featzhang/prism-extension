@@ -314,6 +314,33 @@ class PRismApp {
     this.bindTooltipEvents();
   }
 
+  // Show expert error state below PR item
+  showExpertError(prNumber, errorMessage) {
+    const expertRow = document.getElementById(`expert-results-${prNumber}`);
+    if (!expertRow) {
+      // Create new expert results row if it doesn't exist
+      const prItem = document.querySelector(`.pr-item[data-pr-number="${prNumber}"]`);
+      if (prItem) {
+        const expertRow = document.createElement('div');
+        expertRow.id = `expert-results-${prNumber}`;
+        expertRow.className = 'expert-results-row';
+        prItem.appendChild(expertRow);
+      } else {
+        return;
+      }
+    }
+
+    expertRow.innerHTML = `
+      <div class="expert-error">
+        <svg viewBox="0 0 16 16" fill="currentColor" class="error-icon">
+          <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        </svg>
+        <span>${errorMessage}</span>
+      </div>
+    `;
+    expertRow.classList.remove('hidden');
+  }
+
   // Bind copy reviewer button events
   bindCopyReviewersEvents() {
     const copyButtons = document.querySelectorAll('.copy-reviewers-btn');
@@ -604,8 +631,8 @@ class PRismApp {
       this.showExpertResults(prNumber, experts);
     } catch (error) {
       console.error(`Failed to suggest experts for PR #${prNumber}:`, error);
-      const expertList = document.getElementById('expert-list');
-      expertList.innerHTML = `<div class="empty-state">Failed to get expert recommendations for PR #${prNumber}: ${error.message}</div>`;
+      // Show error message to user
+      this.showExpertError(prNumber, error.message);
     } finally {
       this.isLoading = false;
       if (btn) {

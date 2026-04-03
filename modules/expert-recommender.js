@@ -53,6 +53,13 @@ class ExpertRecommender {
   async suggestExpertsForPR(repo, prNumber) {
     try {
       console.log(`Starting expert recommendation analysis for PR #${prNumber}...`);
+      
+      // Check if we're likely to hit rate limits
+      const rateLimitInfo = await this.checkRateLimit();
+      if (rateLimitInfo && rateLimitInfo.remaining < 10) {
+        throw new Error(`GitHub API rate limit is low (${rateLimitInfo.remaining} remaining). Please wait ${rateLimitInfo.resetInMinutes} minutes before trying again.`);
+      }
+      
       // Get PR changed files list
       const prDetail = await this.github.getPRDetail(repo, prNumber);
       console.log(`PR details retrieved:`, prDetail);
@@ -83,16 +90,40 @@ class ExpertRecommender {
         return [];
       }
       
-      // Get contributors for each file
-      const fileExperts = await Promise.all(
-        allFiles.map(async file => {
-          const contributors = await this.getFileContributors(repo, file.filename, 5);
-          return {
+      // Limit the number of files to analyze to avoid rate limits
+      const maxFilesToAnalyze = 20;
+      const filesToAnalyze = allFiles.slice(0, maxFilesToAnalyze);
+      
+      if (allFiles.length > maxFilesToAnalyze) {
+        console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} to avoid rate limits`);
+      }
+      
+      // Get contributors for each file with rate limiting
+      const fileExperts = [];
+      for (let i = 0; i < filesToAnalyze.length; i++) {
+        const file = filesToAnalyze[i];
+        
+        // Add small delay between API calls to avoid hitting rate limits
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        
+        try {
+          const contributors = await this.getFileContributors(repo, file.filename, 3); // Limit to top 3 contributors per file
+          fileExperts.push({
             file: file.filename,
             contributors: contributors
-          };
-        })
-      );
+          });
+        } catch (error) {
+          console.warn(`Failed to get contributors for ${file.filename}:`, error.message);
+          // Continue with other files even if one fails
+        }
+      }
+
+      if (fileExperts.length === 0) {
+        console.warn(`No file contributors found for PR #${prNumber}`);
+        return [];
+      }
 
       // Merge all contributors and calculate comprehensive scores
       const expertScores = {};
@@ -126,7 +157,7 @@ class ExpertRecommender {
       const experts = Object.values(expertScores).map(expert => {
         // Score formula: base commits + file coverage + recent activity
         const baseScore = Math.log(expert.totalCommits + 1) * 10;
-        const fileCoverage = expert.fileCount / allFiles.length * 20;
+        const fileCoverage = expert.fileCount / fileExperts.length * 20;
         const recentScore = expert.recentActivity * 5;
         
         expert.score = baseScore + fileCoverage + recentScore;
@@ -144,8 +175,36 @@ class ExpertRecommender {
         }));
 
     } catch (error) {
-      console.warn(`Failed to suggest experts for PR #${prNumber}:`, error.message);
-      return [];
+      console.error(`Failed to suggest experts for PR #${prNumber}:`, error.message);
+      // Re-throw with more descriptive error for the UI
+      if (error.message.includes('Rate limit')) {
+        throw new Error(`GitHub API rate limit exceeded. Please wait a few minutes before trying again.`);
+      }
+      throw new Error(`Unable to get expert recommendations: ${error.message}`);
+    }
+  }
+
+  // Check GitHub API rate limit status
+  async checkRateLimit() {
+    try {
+      const rateLimitUrl = `${CONFIG.GITHUB_API}/rate_limit`;
+      const rateLimitData = await this.github.fetch(rateLimitUrl);
+      
+      const core = rateLimitData.resources.core;
+      const remaining = core.remaining;
+      const resetTime = new Date(core.reset * 1000);
+      const now = new Date();
+      const resetInMinutes = Math.ceil((resetTime - now) / (1000 * 60));
+      
+      return {
+        remaining: remaining,
+        limit: core.limit,
+        resetTime: resetTime,
+        resetInMinutes: resetInMinutes
+      };
+    } catch (error) {
+      console.warn('Failed to check rate limit:', error.message);
+      return null;
     }
   }
 
