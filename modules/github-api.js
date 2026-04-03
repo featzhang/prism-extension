@@ -22,9 +22,6 @@ class GitHubAPI {
     // Increment request counter
     this.requestCount++;
     this.lastRequestTime = new Date();
-    
-    // Emit request count update event
-    this.emitRequestCountUpdate();
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
@@ -77,22 +74,69 @@ class GitHubAPI {
     }
   }
 
-  // Emit request count update event
-  emitRequestCountUpdate() {
-    const event = new CustomEvent('githubApiRequestCount', {
-      detail: {
-        count: this.requestCount,
-        lastRequestTime: this.lastRequestTime
+  // Emit request count update event with rate limit info
+  async emitRequestCountUpdate(includeRateLimit = false) {
+    try {
+      let rateLimitInfo = null;
+      if (includeRateLimit) {
+        rateLimitInfo = await this.getRateLimitInfo();
       }
-    });
-    window.dispatchEvent(event);
+      
+      const event = new CustomEvent('githubApiRequestCount', {
+        detail: {
+          count: this.requestCount,
+          lastRequestTime: this.lastRequestTime,
+          rateLimitInfo: rateLimitInfo
+        }
+      });
+      
+      window.dispatchEvent(event);
+    } catch (error) {
+      console.warn('Failed to emit request count update:', error.message);
+      // Still emit the event without rate limit info
+      const event = new CustomEvent('githubApiRequestCount', {
+        detail: {
+          count: this.requestCount,
+          lastRequestTime: this.lastRequestTime,
+          rateLimitInfo: null
+        }
+      });
+      window.dispatchEvent(event);
+    }
+  }
+
+  // Get rate limit information
+  async getRateLimitInfo() {
+    try {
+      const rateLimitUrl = `${CONFIG.GITHUB_API}/rate_limit`;
+      const rateLimitData = await this.fetch(rateLimitUrl);
+      
+      const core = rateLimitData.resources.core;
+      const remaining = core.remaining;
+      const limit = core.limit;
+      const resetTime = new Date(core.reset * 1000);
+      const now = new Date();
+      const resetInMinutes = Math.ceil((resetTime - now) / (1000 * 60));
+      
+      return {
+        remaining: remaining,
+        limit: limit,
+        resetTime: resetTime,
+        resetInMinutes: resetInMinutes,
+        used: limit - remaining,
+        usedPercentage: Math.round(((limit - remaining) / limit) * 100)
+      };
+    } catch (error) {
+      console.warn('Failed to get rate limit info:', error.message);
+      return null;
+    }
   }
 
   // Reset request counter
   resetRequestCount() {
     this.requestCount = 0;
     this.lastRequestTime = null;
-    this.emitRequestCountUpdate();
+    this.emitRequestCountUpdate(false);
   }
 
   // Get current request count
@@ -136,8 +180,14 @@ class GitHubAPI {
 
   async getPRList(repo, { state = 'open', page = 1, sort = 'created', direction = 'desc', author = '', perPage = CONFIG.DEFAULT_PER_PAGE } = {}) {
     const cacheKey = `cache_prs_${repo}_${state}_${sort}_${direction}_p${page}_a${author}_pp${perPage}`;
-    const cached = await this.storage.getCache(cacheKey);
-    if (cached) return cached;
+    
+    // Check cache first (if chrome.storage is available)
+    try {
+      const cached = await this.storage.getCache(cacheKey);
+      if (cached) return cached;
+    } catch (error) {
+      console.warn('Cache access failed, proceeding without cache:', error.message);
+    }
 
     try {
       let prs;
@@ -153,12 +203,20 @@ class GitHubAPI {
         const apiState = state === 'all' ? 'all' : (state === 'merged' ? 'closed' : state);
         const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${perPage}&sort=${sort}&direction=${direction}`;
         prs = await this.fetch(url);
+        
+        // For 'merged' state, filter to only include merged PRs
         if (state === 'merged') {
           prs = prs.filter(pr => pr.merged_at != null);
         }
       }
 
-      await this.storage.setCache(cacheKey, prs, CONFIG.TTL_PRS);
+      // Cache the result (if chrome.storage is available)
+      try {
+        await this.storage.setCache(cacheKey, prs, CONFIG.TTL_PRS);
+      } catch (error) {
+        console.warn('Cache set failed:', error.message);
+      }
+      
       return prs;
     } catch (error) {
       console.warn(`Failed to get PR list for ${repo}:`, error.message);

@@ -62,9 +62,9 @@ class ExpertRecommender {
         throw new Error(rateLimitStatus.message);
       }
       
-      // More aggressive rate limiting for expert recommendations
-      if (rateLimitStatus.status === 'low' && rateLimitStatus.remaining < 10) {
-        throw new Error(`${rateLimitStatus.message} Expert recommendations require multiple API calls. Please wait or use a GitHub token.`);
+      // More intelligent rate limiting based on available quota
+      if (rateLimitStatus.status === 'critical' && rateLimitStatus.maxPRsToAnalyze === 0) {
+        throw new Error(`${rateLimitStatus.message} Expert recommendations require multiple API calls.`);
       }
       
       // Check if we have cached results for this PR
@@ -105,30 +105,37 @@ class ExpertRecommender {
         return [];
       }
       
-      // More conservative file analysis limits based on rate limit status
+      // Intelligent file analysis limits based on rate limit status and file count
       let maxFilesToAnalyze;
-      if (rateLimitStatus.status === 'low') {
-        maxFilesToAnalyze = 5; // Very conservative when rate limit is low
+      if (rateLimitStatus.status === 'critical') {
+        maxFilesToAnalyze = 3; // Very conservative when rate limit is critical
+      } else if (rateLimitStatus.status === 'low') {
+        maxFilesToAnalyze = 5; // Conservative when rate limit is low
       } else if (rateLimitStatus.remaining < 30) {
         maxFilesToAnalyze = 8; // Conservative when approaching limit
       } else {
         maxFilesToAnalyze = 15; // Normal limit
       }
       
+      // Further limit based on actual file count to avoid unnecessary API calls
+      maxFilesToAnalyze = Math.min(maxFilesToAnalyze, allFiles.length);
+      
       const filesToAnalyze = allFiles.slice(0, maxFilesToAnalyze);
       
       if (allFiles.length > maxFilesToAnalyze) {
-        console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} due to rate limits`);
+        console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} due to rate limits (${rateLimitStatus.remaining}/${rateLimitStatus.limit} remaining)`);
       }
       
-      // Get contributors for each file with rate limiting
+      // Get contributors for each file with intelligent rate limiting
       const fileExperts = [];
       for (let i = 0; i < filesToAnalyze.length; i++) {
         const file = filesToAnalyze[i];
         
-        // Add delay between API calls to respect rate limits
+        // Add intelligent delay between API calls based on rate limit status
         if (i > 0) {
-          const delay = rateLimitStatus.status === 'low' ? 1000 : 500; // Longer delays when rate limit is low
+          const delay = rateLimitStatus.status === 'critical' ? 2000 : 
+                       rateLimitStatus.status === 'low' ? 1000 : 500;
+          console.log(`Adding ${delay}ms delay between API calls (rate limit: ${rateLimitStatus.status})`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
         
@@ -206,9 +213,34 @@ class ExpertRecommender {
 
     } catch (error) {
       console.error(`Failed to suggest experts for PR #${prNumber}:`, error.message);
+      
+      // Enhanced error handling with detailed rate limit information
+      let detailedError = error.message;
+      
+      if (error.message.includes('Rate limit') || error.message.includes('rate limit')) {
+        const rateLimitStatus = await this.getRateLimitStatus();
+        if (rateLimitStatus) {
+          detailedError += `\n\nRate Limit Details:`;
+          detailedError += `\n• Status: ${rateLimitStatus.status.toUpperCase()}`;
+          detailedError += `\n• Remaining: ${rateLimitStatus.remaining}/${rateLimitStatus.limit}`;
+          detailedError += `\n• Resets in: ${rateLimitStatus.resetInMinutes} minutes`;
+          
+          if (rateLimitStatus.suggestions && rateLimitStatus.suggestions.length > 0) {
+            detailedError += `\n\nSuggestions:`;
+            rateLimitStatus.suggestions.forEach(suggestion => {
+              detailedError += `\n• ${suggestion}`;
+            });
+          }
+          
+          detailedError += `\n\nExpert Recommendations Usage:`;
+          detailedError += `\n• Estimated API calls per PR: 10-20+`;
+          detailedError += `\n• Current capacity: ${rateLimitStatus.maxPRsToAnalyze} PRs`;
+        }
+      }
+      
       // Re-throw with more descriptive error for the UI
       if (error.message.includes('Rate limit') || error.message.includes('rate limit')) {
-        throw new Error(`GitHub API rate limit issue: ${error.message}`);
+        throw new Error(detailedError);
       }
       throw new Error(`Unable to get expert recommendations: ${error.message}`);
     }
@@ -238,45 +270,75 @@ class ExpertRecommender {
     }
   }
 
-  // Get rate limit status with detailed information
+  // Get rate limit status with detailed information and expert-specific guidance
   async getRateLimitStatus() {
     const rateLimitInfo = await this.checkRateLimit();
     if (!rateLimitInfo) {
       return {
         status: 'unknown',
-        message: 'Unable to check rate limit status'
+        message: 'Unable to check rate limit status',
+        suggestions: [
+          'Proceed with caution - rate limit status unknown',
+          'Consider using a GitHub Personal Access Token'
+        ]
       };
     }
 
     const { remaining, limit, resetInMinutes } = rateLimitInfo;
+    
+    // Expert recommendations require multiple API calls per PR
+    const estimatedCallsPerPR = 10; // Conservative estimate
+    const maxPRsToAnalyze = Math.floor(remaining / estimatedCallsPerPR);
     
     if (remaining === 0) {
       return {
         status: 'exhausted',
         message: `GitHub API rate limit exhausted (${remaining}/${limit} remaining). Please wait ${resetInMinutes} minutes before trying again.`,
         resetInMinutes: resetInMinutes,
+        maxPRsToAnalyze: 0,
         suggestions: [
-          'Wait for the rate limit to reset automatically',
+          'Wait for the rate limit to reset automatically (usually 1 hour)',
           'Use a GitHub Personal Access Token for higher limits (5000/hour)',
-          'Try again later when the limit resets'
+          'Try again later when the limit resets',
+          'Expert recommendations require multiple API calls per PR'
         ]
       };
-    } else if (remaining < 10) {
+    } else if (remaining < 5) {
+      return {
+        status: 'critical',
+        message: `GitHub API rate limit is critical (${remaining}/${limit} remaining). Expert recommendations may fail.`,
+        remaining: remaining,
+        maxPRsToAnalyze: Math.min(maxPRsToAnalyze, 1), // Only 1 PR at most
+        suggestions: [
+          'Proceed with extreme caution - may hit rate limit',
+          'Consider using a GitHub Personal Access Token',
+          'Limit analysis to 1 PR only',
+          'Expert recommendations require 10+ API calls per PR'
+        ]
+      };
+    } else if (remaining < 20) {
       return {
         status: 'low',
-        message: `GitHub API rate limit is low (${remaining}/${limit} remaining). Consider waiting or using a token.`,
+        message: `GitHub API rate limit is low (${remaining}/${limit} remaining). Expert recommendations will be limited.`,
         remaining: remaining,
+        maxPRsToAnalyze: Math.min(maxPRsToAnalyze, 3), // Limit to 3 PRs
         suggestions: [
-          'Proceed with caution - may hit rate limit soon',
+          'Proceed with caution - rate limit is low',
           'Consider using a GitHub Personal Access Token',
-          'Limit the number of PRs analyzed'
+          'Expert recommendations will analyze fewer files',
+          `Can analyze up to ${Math.min(maxPRsToAnalyze, 3)} PRs`
         ]
       };
     } else {
       return {
         status: 'healthy',
         message: `GitHub API rate limit is healthy (${remaining}/${limit} remaining)`,
-        remaining: remaining
+        remaining: remaining,
+        maxPRsToAnalyze: maxPRsToAnalyze,
+        suggestions: [
+          'Rate limit is sufficient for expert recommendations',
+          `Can analyze up to ${maxPRsToAnalyze} PRs`
+        ]
       };
     }
   }

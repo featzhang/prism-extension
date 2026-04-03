@@ -63,7 +63,7 @@ class PRismApp {
     
     // Listen for request count updates
     window.addEventListener('githubApiRequestCount', (event) => {
-      this.updateRequestCounter(event.detail.count);
+      this.updateRequestCounter(event.detail.count, event.detail.rateLimitInfo);
     });
     
     // Add click handler to reset counter
@@ -72,14 +72,14 @@ class PRismApp {
     });
     
     // Set initial state
-    this.updateRequestCounter(0);
+    this.updateRequestCounter(0, null);
   }
 
   // Update request counter display
-  updateRequestCounter(count) {
+  updateRequestCounter(count, rateLimitInfo) {
     this.requestCountElement.textContent = count;
     
-    // Update counter state based on count
+    // Update counter state based on count with more granular thresholds
     this.requestCounter.classList.remove('warning', 'critical');
     
     if (count >= 50) {
@@ -88,10 +88,28 @@ class PRismApp {
       this.requestCounter.classList.add('warning');
     }
     
-    // Update tooltip with detailed information
+    // Update tooltip with detailed information including rate limit status
     const lastRequestTime = this.github.lastRequestTime;
     const timeInfo = lastRequestTime ? `\nLast request: ${lastRequestTime.toLocaleTimeString()}` : '';
-    this.requestCounter.title = `GitHub API Requests: ${count}${timeInfo}\nClick to reset counter`;
+    
+    let tooltip = `GitHub API Requests: ${count}${timeInfo}`;
+    
+    if (rateLimitInfo) {
+      const { remaining, limit, resetInMinutes, usedPercentage } = rateLimitInfo;
+      tooltip += `\n\nRate Limit Status:`;
+      tooltip += `\n• Used: ${limit - remaining}/${limit} (${usedPercentage}%)`;
+      tooltip += `\n• Remaining: ${remaining}`;
+      tooltip += `\n• Resets in: ${resetInMinutes} minutes`;
+      
+      if (remaining === 0) {
+        tooltip += `\n\n⚠️ Rate limit exhausted!`;
+      } else if (remaining < 10) {
+        tooltip += `\n\n⚠️ Rate limit low!`;
+      }
+    }
+    
+    tooltip += `\n\nClick to reset counter`;
+    this.requestCounter.title = tooltip;
   }
 
   async loadSettings() {
