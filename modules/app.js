@@ -29,25 +29,47 @@ class PRismApp {
   }
 
   async init() {
-    this.repo = await this.storage.getRepo();
-    this.github.setToken(await this.storage.getToken());
-    this.currentAuthor = await this.storage.getUsername();
-    this.customRepos = await this.storage.getCustomRepos();
-    
-    // Initialize repository selector
-    this.initRepoSelect();
-    
-    // Initialize page size selector
-    const userPerPage = await this.storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
-    const pageSizeSelect = document.getElementById('page-size-select');
-    if (pageSizeSelect) {
-      pageSizeSelect.value = userPerPage;
+    try {
+      this.repo = await this.storage.getRepo();
+      const token = await this.storage.getToken();
+      this.github.setToken(token);
+      this.currentAuthor = await this.storage.getUsername();
+      this.customRepos = await this.storage.getCustomRepos();
+      
+      // Initialize repository selector
+      this.initRepoSelect();
+      
+      // Initialize page size selector
+      const userPerPage = await this.storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+      const pageSizeSelect = document.getElementById('page-size-select');
+      if (pageSizeSelect) {
+        pageSizeSelect.value = userPerPage;
+      }
+      
+      this.renderAuthState();
+      this.bindEvents();
+      this.watchAuthStorage();
+      
+      // Test API connection before loading data
+      if (token) {
+        try {
+          // Test API with a simple request to verify token
+          await this.github.fetch(`${CONFIG.GITHUB_API}/user`, 1, 1000);
+        } catch (error) {
+          console.warn('Token validation failed:', error.message);
+          // Clear invalid token
+          this.github.setToken('');
+          await this.storage.clearAuth();
+          this.currentAuthor = '';
+          this.renderAuthState();
+        }
+      }
+      
+      await this.loadAll();
+    } catch (error) {
+      console.error('App initialization failed:', error);
+      this.renderer.showStatus(`Initialization error: ${error.message}`, true);
     }
-    
-    this.renderAuthState();
-    this.bindEvents();
-    this.watchAuthStorage();
-    await this.loadAll();
   }
 
   initRepoSelect() {
@@ -691,7 +713,13 @@ class PRismApp {
           const loginBtn = document.getElementById('btn-login');
           loginBtn.disabled = false;
           loginBtn.textContent = 'Login';
-          this.storage.clearCacheByPrefix('cache_').then(() => this.loadAll());
+          // Clear cache and reload data
+          this.storage.clearCacheByPrefix('cache_').then(() => {
+            this.renderer.renderStatsLoading();
+            this.loadAll().catch(err => {
+              console.error('Failed to reload after login:', err);
+            });
+          });
         });
       }
       if (msg.type === 'LOGIN_ERROR') {
@@ -707,15 +735,24 @@ class PRismApp {
       if (area !== 'local') return;
 
       if (changes.gh_token || changes.username) {
-        this.github.setToken(await this.storage.getToken());
-        this.currentAuthor = await this.storage.getUsername();
-        this.renderAuthState();
-        this.renderer.hideStatus();
-        const loginBtn = document.getElementById('btn-login');
-        loginBtn.disabled = false;
-        loginBtn.textContent = 'Login';
-        await this.storage.clearCacheByPrefix('cache_');
-        await this.loadAll();
+        const newToken = await this.storage.getToken();
+        const newUsername = await this.storage.getUsername();
+        
+        // Only update if values actually changed
+        if (newToken !== this.github._token || newUsername !== this.currentAuthor) {
+          this.github.setToken(newToken);
+          this.currentAuthor = newUsername;
+          this.renderAuthState();
+          this.renderer.hideStatus();
+          const loginBtn = document.getElementById('btn-login');
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Login';
+          
+          // Clear cache and reload data
+          await this.storage.clearCacheByPrefix('cache_');
+          this.renderer.renderStatsLoading();
+          await this.loadAll();
+        }
       }
 
       if (changes.gh_login_error) {
@@ -835,10 +872,29 @@ class PRismApp {
       }
     } catch (err) {
       console.error('Failed to load PRs:', err);
-      this.renderer.showStatus(err.message, true);
-      document.getElementById('pr-list').innerHTML =
-        `<div class="empty-state">Failed to load PRs: ${escapeHtml(err.message)}</div>`;
-    } finally {
+      
+      // Handle authentication errors specifically
+      if (err.message.includes('Authentication failed') || err.message.includes('401')) {
+        // Clear invalid token and update UI
+        this.github.setToken('');
+        await this.storage.clearAuth();
+        this.currentAuthor = '';
+        this.renderAuthState();
+        this.renderer.showStatus('Authentication failed. Please login again.', true);
+      } else {
+        this.renderer.showStatus(err.message, true);
+      }
+      
+      this.renderer.renderError(err.message);
+      
+      // Bind retry button
+      const retryBtn = document.getElementById('retry-load');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+          this.loadPRs();
+        });
+      }
+    }    } finally {
       this._prLoadInProgress = false;
       this.setLoading(false);
     }

@@ -25,22 +25,36 @@ class GitHubAPI {
           return resp.json();
         }
         
-        // Retry on 503 errors
-        if (resp.status === 503 && attempt < retries) {
-          console.warn(`GitHub API 503 error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
+        // Handle authentication errors
+        if (resp.status === 401 || resp.status === 403) {
+          const errorMsg = resp.status === 401 
+            ? 'Authentication failed. Please login again.'
+            : 'Rate limit exceeded. Please wait before refreshing.';
+          
+          // Clear token if authentication failed
+          if (resp.status === 401) {
+            this._token = '';
+            chrome.storage.local.remove('gh_token');
+          }
+          
+          throw new Error(errorMsg);
+        }
+        
+        // Retry on 5xx errors
+        if (resp.status >= 500 && resp.status < 600 && attempt < retries) {
+          console.warn(`GitHub API ${resp.status} error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2; // Exponential backoff
           continue;
         }
         
-        const msg = resp.status === 403
-          ? 'Rate limit exceeded. Please wait before refreshing.'
-          : `GitHub API error: ${resp.status} ${resp.statusText}`;
-        throw new Error(msg);
+        // Handle other errors
+        throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
         
       } catch (error) {
-        // Retry on network errors or 503 errors
-        if ((error.message.includes('Failed to fetch') || error.message.includes('503')) && attempt < retries) {
+        // Retry on network errors or 5xx errors
+        if ((error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || 
+             error.message.includes('503') || error.message.includes('500')) && attempt < retries) {
           console.warn(`Network error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2; // Exponential backoff
@@ -90,26 +104,32 @@ class GitHubAPI {
     const cached = await this.storage.getCache(cacheKey);
     if (cached) return cached;
 
-    let prs;
-    if (author) {
-      // Use Search API to filter by author
-      const stateQ = state === 'merged' ? 'is:merged' : (state === 'all' ? '' : `is:${state}`);
-      const q = `repo:${repo}+is:pr+author:${encodeURIComponent(author)}${stateQ ? '+' + stateQ : ''}`;
-      const sortParam = sort === 'updated' ? 'updated' : 'created';
-      const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${perPage}`;
-      const result = await this.fetch(url);
-      prs = result.items;
-    } else {
-      const apiState = state === 'all' ? 'all' : (state === 'merged' ? 'closed' : state);
-      const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${perPage}&sort=${sort}&direction=${direction}`;
-      prs = await this.fetch(url);
-      if (state === 'merged') {
-        prs = prs.filter(pr => pr.merged_at != null);
+    try {
+      let prs;
+      if (author) {
+        // Use Search API to filter by author
+        const stateQ = state === 'merged' ? 'is:merged' : (state === 'all' ? '' : `is:${state}`);
+        const q = `repo:${repo}+is:pr+author:${encodeURIComponent(author)}${stateQ ? '+' + stateQ : ''}`;
+        const sortParam = sort === 'updated' ? 'updated' : 'created';
+        const url = `${CONFIG.GITHUB_API}/search/issues?q=${q}&sort=${sortParam}&order=${direction}&page=${page}&per_page=${perPage}`;
+        const result = await this.fetch(url);
+        prs = result.items;
+      } else {
+        const apiState = state === 'all' ? 'all' : (state === 'merged' ? 'closed' : state);
+        const url = `${CONFIG.GITHUB_API}/repos/${repo}/pulls?state=${apiState}&page=${page}&per_page=${perPage}&sort=${sort}&direction=${direction}`;
+        prs = await this.fetch(url);
+        if (state === 'merged') {
+          prs = prs.filter(pr => pr.merged_at != null);
+        }
       }
-    }
 
-    await this.storage.setCache(cacheKey, prs, CONFIG.TTL_PRS);
-    return prs;
+      await this.storage.setCache(cacheKey, prs, CONFIG.TTL_PRS);
+      return prs;
+    } catch (error) {
+      console.warn(`Failed to get PR list for ${repo}:`, error.message);
+      // Return empty array instead of throwing error to prevent UI blocking
+      return [];
+    }
   }
 
   async getPRComments(repo, prNumber) {

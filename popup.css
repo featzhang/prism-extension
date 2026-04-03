@@ -356,6 +356,56 @@ body {
   color: var(--text-muted);
 }
 
+.error-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.error-state svg {
+  color: var(--color-failure);
+  opacity: 0.7;
+}
+
+.error-state h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.error-state p {
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 250px;
+}
+
+.retry-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.retry-btn:hover {
+  background: var(--bg-hover);
+  border-color: #a8b1ba;
+}
+
+.retry-btn:active {
+  transform: scale(0.95);
+}
+
 .pr-item {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
