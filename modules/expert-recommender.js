@@ -107,10 +107,12 @@ class ExpertRecommender {
         return [];
       }
       
-      // Intelligent file analysis limits based on rate limit status and file count
+      // Intelligent file analysis limits based on rate limit status and file count.
+      // critical status already has maxPRsToAnalyze=0 so this path should not be reached,
+      // but guard here as a safety net.
       let maxFilesToAnalyze;
-      if (rateLimitStatus.status === 'critical') {
-        maxFilesToAnalyze = 3; // Very conservative when rate limit is critical
+      if (rateLimitStatus.status === 'critical' || rateLimitStatus.status === 'exhausted') {
+        maxFilesToAnalyze = 0; // Should have been blocked upstream; hard-stop here
       } else if (rateLimitStatus.status === 'low') {
         maxFilesToAnalyze = 5; // Conservative when rate limit is low
       } else if (rateLimitStatus.remaining < 30) {
@@ -121,11 +123,31 @@ class ExpertRecommender {
       
       // Further limit based on actual file count to avoid unnecessary API calls
       maxFilesToAnalyze = Math.min(maxFilesToAnalyze, allFiles.length);
+
+      if (maxFilesToAnalyze === 0) {
+        throw new Error(`${rateLimitStatus.message}`);
+      }
       
       const filesToAnalyze = allFiles.slice(0, maxFilesToAnalyze);
       
       if (allFiles.length > maxFilesToAnalyze) {
         console.log(`Limiting analysis to first ${maxFilesToAnalyze} files out of ${allFiles.length} due to rate limits (${rateLimitStatus.remaining}/${rateLimitStatus.limit} remaining)`);
+      }
+
+      // Predictive quota check: estimate API calls this analysis will consume and fail
+      // fast if insufficient quota remains, rather than failing mid-analysis.
+      // Cost model: 1 (PR detail already done) + 1 (files list already done) + 2 per file
+      // (commits endpoint + possible paginated follow-up) + 1 buffer = filesToAnalyze * 2 + 3
+      if (rateLimitStatus.remaining !== undefined) {
+        const estimatedCalls = filesToAnalyze.length * 2 + 3;
+        if (rateLimitStatus.remaining < estimatedCalls) {
+          const resetInfo = rateLimitStatus.resetInMinutes != null
+            ? ` Resets in ${rateLimitStatus.resetInMinutes} min.`
+            : '';
+          throw new Error(
+            `Insufficient API quota: ~${estimatedCalls} calls needed, only ${rateLimitStatus.remaining} remaining.${resetInfo}`
+          );
+        }
       }
       
       // Get contributors for each file with intelligent rate limiting
@@ -288,14 +310,20 @@ class ExpertRecommender {
 
     const { remaining, limit, resetInMinutes } = rateLimitInfo;
     
-    // Expert recommendations require multiple API calls per PR
-    const estimatedCallsPerPR = 10; // Conservative estimate
+    // Expert recommendations require multiple API calls per PR.
+    // Each PR costs: 1 (PR detail) + 1 (files list) + ~2 per file analyzed = ~15 calls for a typical PR.
+    // Thresholds are intentionally conservative to prevent mid-analysis 403s:
+    //   critical: < 15  — less than one full PR analysis worth of quota
+    //   low:      < 50  — less than ~3 full PR analyses, limit batch operations
+    //   healthy:  ≥ 50
+    const estimatedCallsPerPR = 15;
     const maxPRsToAnalyze = Math.floor(remaining / estimatedCallsPerPR);
     
     if (remaining === 0) {
       return {
         status: 'exhausted',
         message: `GitHub API rate limit exhausted (${remaining}/${limit} remaining). Please wait ${resetInMinutes} minutes before trying again.`,
+        remaining: remaining,
         resetInMinutes: resetInMinutes,
         maxPRsToAnalyze: 0,
         suggestions: [
@@ -305,25 +333,28 @@ class ExpertRecommender {
           'Expert recommendations require multiple API calls per PR'
         ]
       };
-    } else if (remaining < 5) {
+    } else if (remaining < 15) {
+      // Less than one full PR analysis worth of quota — block immediately
       return {
         status: 'critical',
-        message: `GitHub API rate limit is critical (${remaining}/${limit} remaining). Expert recommendations may fail.`,
+        message: `GitHub API rate limit is critical (${remaining}/${limit} remaining, resets in ${resetInMinutes} min). Expert recommendations require ~15 API calls and will likely fail.`,
         remaining: remaining,
-        maxPRsToAnalyze: Math.min(maxPRsToAnalyze, 1), // Only 1 PR at most
+        resetInMinutes: resetInMinutes,
+        maxPRsToAnalyze: 0, // Not enough for even one PR — do not attempt
         suggestions: [
-          'Proceed with extreme caution - may hit rate limit',
-          'Consider using a GitHub Personal Access Token',
-          'Limit analysis to 1 PR only',
-          'Expert recommendations require 10+ API calls per PR'
+          'Wait for the rate limit to reset (resets in ' + resetInMinutes + ' minutes)',
+          'Use a GitHub Personal Access Token for higher limits (5000/hour)',
+          'Expert recommendations require ~15 API calls per PR'
         ]
       };
-    } else if (remaining < 20) {
+    } else if (remaining < 50) {
+      // Enough for a limited number of PRs — proceed with caution
       return {
         status: 'low',
-        message: `GitHub API rate limit is low (${remaining}/${limit} remaining). Expert recommendations will be limited.`,
+        message: `GitHub API rate limit is low (${remaining}/${limit} remaining, resets in ${resetInMinutes} min). Expert recommendations will be limited.`,
         remaining: remaining,
-        maxPRsToAnalyze: Math.min(maxPRsToAnalyze, 3), // Limit to 3 PRs
+        resetInMinutes: resetInMinutes,
+        maxPRsToAnalyze: Math.min(maxPRsToAnalyze, 3),
         suggestions: [
           'Proceed with caution - rate limit is low',
           'Consider using a GitHub Personal Access Token',
@@ -336,6 +367,7 @@ class ExpertRecommender {
         status: 'healthy',
         message: `GitHub API rate limit is healthy (${remaining}/${limit} remaining)`,
         remaining: remaining,
+        resetInMinutes: resetInMinutes,
         maxPRsToAnalyze: maxPRsToAnalyze,
         suggestions: [
           'Rate limit is sufficient for expert recommendations',
@@ -362,9 +394,37 @@ class ExpertRecommender {
     return {short: 'OC', full: 'Occasional contributor'};
   }
 
-  // Batch get expert recommendations for multiple PRs
+  // Batch get expert recommendations for multiple PRs.
+  // Performs a single up-front quota check to determine how many PRs can be safely
+  // analyzed, skips the rest immediately rather than letting them fail mid-analysis.
   async batchSuggestExperts(repo, prNumbers, onResult) {
-    const queue = [...prNumbers];
+    // Up-front global quota check — one call for the whole batch
+    const status = await this.getRateLimitStatus();
+    console.log(`[batchSuggestExperts] Rate limit status: ${status.status}, maxPRsToAnalyze: ${status.maxPRsToAnalyze}, remaining: ${status.remaining}`);
+
+    if (status.status === 'exhausted' || status.status === 'critical') {
+      // No quota for even one PR — skip everything
+      prNumbers.forEach(prNumber => {
+        console.warn(`[batchSuggestExperts] Skipping PR #${prNumber}: ${status.message}`);
+        onResult(prNumber, [], { skipped: true, reason: status.message });
+      });
+      return;
+    }
+
+    const maxPRs = status.maxPRsToAnalyze ?? prNumbers.length;
+    const toProcess = prNumbers.slice(0, maxPRs);
+    const skipped = prNumbers.slice(maxPRs);
+
+    // Notify caller about PRs that will be skipped up-front
+    const skipReason = `Rate limit too low to analyze more PRs (${status.remaining} remaining, resets in ${status.resetInMinutes} min).`;
+    skipped.forEach(prNumber => {
+      console.warn(`[batchSuggestExperts] Skipping PR #${prNumber}: ${skipReason}`);
+      onResult(prNumber, [], { skipped: true, reason: skipReason });
+    });
+
+    if (toProcess.length === 0) return;
+
+    const queue = [...toProcess];
     const workers = Array.from({ length: CONFIG.CONCURRENT }, async () => {
       while (queue.length > 0) {
         const prNumber = queue.shift();

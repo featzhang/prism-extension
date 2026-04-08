@@ -26,6 +26,19 @@ class PRismApp {
     this.github = new GitHubAPI();
     this.renderer = new Renderer();
     this.expertRecommender = new ExpertRecommender(this.github);
+
+    // Debounced loadPRs — prevents redundant API calls when filters change rapidly
+    this._debouncedLoadPRs = this._debounce(() => this.loadPRs(), 200);
+  }
+
+  // Returns a function that delays invoking fn until after `wait` ms have elapsed
+  // since the last invocation.
+  _debounce(fn, wait) {
+    let timer = null;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), wait);
+    };
   }
 
   // Initialize the application
@@ -129,6 +142,26 @@ class PRismApp {
       if (pageSizeSelect) {
         pageSizeSelect.value = userPerPage;
       }
+
+      // Restore persisted filter state
+      const savedState = await this.storage.getUserConfig('filterState', 'open');
+      const savedSort = await this.storage.getUserConfig('filterSort', 'created-desc');
+      const savedCI = await this.storage.getUserConfig('filterCI', 'all');
+
+      this.currentState = savedState;
+      const [sort, dir] = savedSort.split('-');
+      this.currentSort = sort || 'created';
+      this.currentDirection = dir || 'desc';
+      this.currentCIFilter = savedCI;
+
+      const stateSelect = document.getElementById('state-select');
+      if (stateSelect) stateSelect.value = this.currentState;
+
+      const sortSelect = document.getElementById('sort-select');
+      if (sortSelect) sortSelect.value = savedSort;
+
+      const ciFilterSelect = document.getElementById('ci-filter-select');
+      if (ciFilterSelect) ciFilterSelect.value = this.currentCIFilter;
       
       this.renderAuthState();
     } catch (error) {
@@ -222,7 +255,8 @@ class PRismApp {
       if (this.isLoading) return;
       this.currentState = e.target.value;
       this.currentPage = 1;
-      this.loadPRs();
+      this.storage.setUserConfig('filterState', this.currentState);
+      this._debouncedLoadPRs();
     });
 
     // Sort select
@@ -232,7 +266,8 @@ class PRismApp {
       this.currentSort = sort;
       this.currentDirection = dir;
       this.currentPage = 1;
-      this.loadPRs();
+      this.storage.setUserConfig('filterSort', `${sort}-${dir}`);
+      this._debouncedLoadPRs();
     });
 
     // Page size control
@@ -253,6 +288,9 @@ class PRismApp {
     });
 
     document.getElementById('btn-next').addEventListener('click', () => {
+      if (this.isLoading) return;
+      const btnNext = document.getElementById('btn-next');
+      if (btnNext && btnNext.disabled) return;
       this.currentPage++;
       this.loadPRs();
     });
@@ -264,6 +302,7 @@ class PRismApp {
     // CI filter
     document.getElementById('ci-filter-select').addEventListener('change', e => {
       this.currentCIFilter = e.target.value;
+      this.storage.setUserConfig('filterCI', this.currentCIFilter);
       this.applyCIFilter();
     });
 
@@ -415,29 +454,30 @@ class PRismApp {
       }
     }
 
-    let detailedMessage = errorMessage;
-    
-    // Add specific guidance for rate limit errors
-    if (errorMessage.includes('rate limit') || errorMessage.includes('Rate limit')) {
-      detailedMessage += `
+    const isRateLimitError = errorMessage.includes('rate limit') || errorMessage.includes('Rate limit')
+      || errorMessage.includes('quota') || errorMessage.includes('Insufficient');
+
+    // Extract resetInMinutes from error message if present (e.g. "resets in 42 min")
+    let resetMinutes = null;
+    const resetMatch = errorMessage.match(/[Rr]esets?\s+in\s+(\d+)\s*min/);
+    if (resetMatch) {
+      resetMinutes = parseInt(resetMatch[1], 10);
+    }
+
+    const countdownId = `rate-limit-countdown-${prNumber}`;
+    const rateLimitHtml = isRateLimitError ? `
       <div class="rate-limit-solutions">
-        <strong>Why expert recommendations use more API calls:</strong>
-        <p>Expert analysis requires multiple API calls to analyze file history and contributors.</p>
-        
+        ${resetMinutes != null ? `<div class="rate-limit-countdown" id="${countdownId}">Resets in <strong>${resetMinutes}</strong> min</div>` : ''}
         <strong>Solutions:</strong>
         <ul>
           <li>Wait for the rate limit to reset (usually 1 hour)</li>
           <li>Use a GitHub Personal Access Token for 5000 requests/hour</li>
           <li>Configure token in extension settings</li>
-          <li>Try again later when the limit resets</li>
         </ul>
-        
         <div class="api-usage-info">
-          <small>Note: Expert recommendations analyze file history and can use 10-20+ API calls per PR.</small>
+          <small>Expert recommendations require ~15 API calls per PR.</small>
         </div>
-      </div>
-      `;
-    }
+      </div>` : '';
 
     expertRow.innerHTML = `
       <div class="expert-error">
@@ -445,21 +485,28 @@ class PRismApp {
           <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
         </svg>
         <div class="error-content">
-          <div class="error-message">${errorMessage}</div>
-          ${errorMessage.includes('rate limit') || errorMessage.includes('Rate limit') ? `
-          <div class="rate-limit-solutions">
-            <strong>Solutions:</strong>
-            <ul>
-              <li>Wait for the rate limit to reset (usually 1 hour)</li>
-              <li>Use a GitHub Personal Access Token for 5000 requests/hour</li>
-              <li>Configure token in extension settings</li>
-            </ul>
-          </div>
-          ` : ''}
+          <div class="error-message">${escapeHtml(errorMessage)}</div>
+          ${rateLimitHtml}
         </div>
       </div>
     `;
     expertRow.classList.remove('hidden');
+
+    // Start a per-minute countdown if we know when the limit resets
+    if (resetMinutes != null && resetMinutes > 0) {
+      let remaining = resetMinutes;
+      const timer = setInterval(() => {
+        remaining--;
+        const el = document.getElementById(countdownId);
+        if (!el) { clearInterval(timer); return; }
+        if (remaining <= 0) {
+          el.innerHTML = 'Rate limit should have reset — try again now.';
+          clearInterval(timer);
+        } else {
+          el.innerHTML = `Resets in <strong>${remaining}</strong> min`;
+        }
+      }, 60 * 1000);
+    }
   }
 
   // Bind copy reviewer button events
@@ -730,8 +777,13 @@ class PRismApp {
       const prNumbers = this.currentPRs.map(pr => pr.number);
       const expertResults = {};
 
-      await this.expertRecommender.batchSuggestExperts(this.repo, prNumbers, (prNumber, experts) => {
-        expertResults[prNumber] = experts;
+      await this.expertRecommender.batchSuggestExperts(this.repo, prNumbers, (prNumber, experts, meta) => {
+        if (meta && meta.skipped) {
+          // Show a specific skipped indicator rather than an empty result
+          expertResults[prNumber] = { skipped: true, reason: meta.reason };
+        } else {
+          expertResults[prNumber] = experts;
+        }
         this.updateExpertPanel(expertResults);
       });
 
@@ -859,7 +911,25 @@ class PRismApp {
     
     // Show expert recommendations for each PR
     this.currentPRs.forEach(pr => {
-      const experts = expertResults[pr.number] || [];
+      const result = expertResults[pr.number];
+
+      // Skipped due to insufficient quota — show a concise notice inline
+      if (result && result.skipped) {
+        html += `
+          <div class="expert-pr-item expert-pr-skipped">
+            <div class="expert-pr-header">
+              <span class="expert-pr-title">PR #${pr.number}</span>
+              <span class="expert-pr-number">${escapeHtml(pr.title)}</span>
+            </div>
+            <div class="expert-skipped-notice">
+              <small>⏭ Skipped — ${escapeHtml(result.reason)}</small>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const experts = result || [];
       if (experts.length === 0) return;
 
       // Generate reviewer list for copying, format: "@user1 @user2 @user3"
@@ -1088,7 +1158,8 @@ class PRismApp {
       await this.renderer.renderPagination(this.currentPage, this.currentPage * userPerPage < this.currentTotalCount, this.currentTotalCount);
     } catch (err) {
       console.error('Failed to load stats:', err);
-      this.renderer.showStatus(`Stats error: ${err.message}`, true);
+      const classified = this._classifyError(err);
+      this.renderer.showStatus(`Stats: ${classified.message} ${classified.hint}`, true);
     }
   }
 
@@ -1098,9 +1169,7 @@ class PRismApp {
     this.setLoading(true);
     this.renderer.renderLoading();
     this.renderer.hideStatus();
-    // Reset CI filter on new load
-    this.currentCIFilter = 'all';
-    document.getElementById('ci-filter-select').value = 'all';
+    // CI filter is preserved across loads — do not reset it here.
 
     try {
       const userPerPage = await this.storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
@@ -1115,7 +1184,10 @@ class PRismApp {
 
       this.currentPRs = prs;
       this.renderer.renderPRList(prs);
-      await this.renderer.renderPagination(this.currentPage, prs.length >= userPerPage, this.currentTotalCount);
+      const hasMore = this.currentTotalCount > 0
+        ? this.currentPage * userPerPage < this.currentTotalCount
+        : prs.length >= userPerPage;
+      await this.renderer.renderPagination(this.currentPage, hasMore, this.currentTotalCount);
 
       // Async load CI statuses and unresolved CR counts
       if (prs.length > 0) {
@@ -1139,21 +1211,23 @@ class PRismApp {
       }
     } catch (err) {
       console.error('Failed to load PRs:', err);
-      
-      // Handle authentication errors specifically
-      if (err.message.includes('Authentication failed') || err.message.includes('401')) {
-        // Clear invalid token and update UI
+
+      const classified = this._classifyError(err);
+
+      if (classified.type === 'auth') {
+        // Clear stale credentials and prompt re-login
         this.github.setToken('');
         await this.storage.clearAuth();
         this.currentAuthor = '';
         this.renderAuthState();
-        this.renderer.showStatus('Authentication failed. Please login again.', true);
-      } else {
-        this.renderer.showStatus(err.message, true);
       }
-      
-      this.renderer.renderError(err.message);
-      
+
+      // Status bar: concise one-liner
+      this.renderer.showStatus(`${classified.message} ${classified.hint}`, true);
+
+      // Main area: full detail with retry button
+      this.renderer.renderError(`${classified.message}\n\n${classified.hint}`);
+
       // Bind retry button
       const retryBtn = document.getElementById('retry-load');
       if (retryBtn) {
@@ -1165,6 +1239,56 @@ class PRismApp {
       this._prLoadInProgress = false;
       this.setLoading(false);
     }
+  }
+
+  // Classify an error into a user-facing category and return a structured object:
+  // { type, message, hint }
+  //   type:    'auth' | 'ratelimit' | 'network' | 'server' | 'unknown'
+  //   message: concise description of what went wrong
+  //   hint:    actionable next step for the user
+  _classifyError(err) {
+    const msg = err.message || '';
+
+    if (msg.includes('invalid or has been revoked') || msg.includes('401')) {
+      return {
+        type: 'auth',
+        message: 'GitHub token invalid or revoked.',
+        hint: 'Click Login to authenticate again.',
+      };
+    }
+    if (msg.includes('rate limit exhausted') || msg.includes('Rate limit exhausted')) {
+      const resetMatch = msg.match(/Resets in (\d+) min/);
+      const resetHint = resetMatch
+        ? `Rate limit resets in ${resetMatch[1]} min. Consider adding a Personal Access Token for 5,000 req/hour.`
+        : 'Wait for the rate limit to reset (up to 1 hour) or add a Personal Access Token.';
+      return { type: 'ratelimit', message: 'GitHub API rate limit exhausted.', hint: resetHint };
+    }
+    if (msg.includes('forbidden (403)') || msg.includes('lacks required permissions')) {
+      return {
+        type: 'auth',
+        message: 'GitHub API request forbidden.',
+        hint: 'Your token may be missing the "repo" scope. Re-login or update the token in Settings.',
+      };
+    }
+    if (msg.includes('Unable to reach GitHub API') || msg.includes('internet connection') || msg.includes('githubstatus.com')) {
+      return {
+        type: 'network',
+        message: 'Cannot reach GitHub.',
+        hint: 'Check your internet connection. If you are online, GitHub may be experiencing an outage — visit https://githubstatus.com',
+      };
+    }
+    if (msg.includes('GitHub server error') || msg.includes('outage')) {
+      return {
+        type: 'server',
+        message: 'GitHub server error.',
+        hint: 'GitHub may be having an outage. Check https://githubstatus.com and try again later.',
+      };
+    }
+    return {
+      type: 'unknown',
+      message: msg || 'An unexpected error occurred.',
+      hint: 'Try refreshing. If the problem persists, check the browser console for details.',
+    };
   }
 
   setLoading(loading) {

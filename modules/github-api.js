@@ -35,22 +35,34 @@ class GitHubAPI {
           return resp.json();
         }
         
-        // Handle authentication errors
-        if (resp.status === 401 || resp.status === 403) {
-          const errorMsg = resp.status === 401 
-            ? 'Authentication failed. Please login again.'
-            : 'Rate limit exceeded. Please wait before refreshing.';
-          
-          // Clear token if authentication failed
-          if (resp.status === 401) {
-            this._token = '';
-            // Use callback to avoid async issues
-            chrome.storage.local.remove('gh_token', () => {
-              console.log('Invalid token cleared from storage');
-            });
+        // Handle authentication / authorization errors
+        if (resp.status === 401) {
+          // Clear invalid token immediately
+          this._token = '';
+          chrome.storage.local.remove('gh_token', () => {
+            console.log('Invalid token cleared from storage');
+          });
+          throw new Error(
+            'GitHub token is invalid or has been revoked. Please log in again to get a new token.'
+          );
+        }
+
+        if (resp.status === 403) {
+          // Try to read rate-limit headers for a more actionable message
+          const remaining = resp.headers.get('X-RateLimit-Remaining');
+          const reset = resp.headers.get('X-RateLimit-Reset');
+          let resetInfo = '';
+          if (reset) {
+            const resetDate = new Date(parseInt(reset, 10) * 1000);
+            const minutesLeft = Math.ceil((resetDate - Date.now()) / 60000);
+            resetInfo = minutesLeft > 0
+              ? ` Resets in ${minutesLeft} min (at ${resetDate.toLocaleTimeString()}).`
+              : ' Rate limit should reset shortly.';
           }
-          
-          throw new Error(errorMsg);
+          const quotaMsg = remaining === '0'
+            ? `GitHub API rate limit exhausted.${resetInfo} Use a Personal Access Token for 5,000 req/hour.`
+            : `GitHub API request forbidden (403).${resetInfo} Your token may lack required permissions (needs repo scope).`;
+          throw new Error(quotaMsg);
         }
         
         // Retry on 5xx errors
@@ -60,19 +72,38 @@ class GitHubAPI {
           delay *= 2; // Exponential backoff
           continue;
         }
+
+        // 5xx exhausted all retries
+        if (resp.status >= 500 && resp.status < 600) {
+          throw new Error(
+            `GitHub server error (${resp.status}). Tried ${retries} times but the server kept failing. GitHub may be having an outage — check https://githubstatus.com`
+          );
+        }
         
         // Handle other errors
         throw new Error(`GitHub API error: ${resp.status} ${resp.statusText}`);
         
       } catch (error) {
         // Retry on network errors or 5xx errors
-        if ((error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || 
-             error.message.includes('503') || error.message.includes('500')) && attempt < retries) {
+        const isNetworkError = error.message.includes('Failed to fetch')
+          || error.message.includes('NetworkError')
+          || error.message.includes('503')
+          || error.message.includes('500');
+
+        if (isNetworkError && attempt < retries) {
           console.warn(`Network error, retrying in ${delay}ms (attempt ${attempt}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2; // Exponential backoff
           continue;
         }
+
+        // Enrich bare network errors with an offline hint on final attempt
+        if (isNetworkError) {
+          throw new Error(
+            'Unable to reach GitHub API. Check your internet connection or visit https://githubstatus.com to see if GitHub is having an outage.'
+          );
+        }
+
         throw error;
       }
     }
@@ -277,6 +308,105 @@ class GitHubAPI {
     return statuses;
   }
 
+  // Read the cached CI provider for a repo (set by getCIStatus during waterfall detection).
+  // Returns: 'github-actions' | 'github-status' | 'flinkbot' | null
+  async getCachedCIProvider(repo) {
+    return this.storage.getCache(`cache_ci_provider_${repo}`);
+  }
+
+  // Persist the detected CI provider for a repo so subsequent PRs skip the full waterfall.
+  async setCachedCIProvider(repo, provider) {
+    const TTL_4H = 4 * 60 * 60 * 1000;
+    await this.storage.setCache(`cache_ci_provider_${repo}`, provider, TTL_4H);
+  }
+
+  // Resolve CI status for a single PR using a waterfall detection strategy:
+  //   1. GitHub Check Runs  (GitHub Actions)
+  //   2. GitHub Commit Status
+  //   3. flinkbot PR comments (Azure CI)
+  //
+  // The first source that returns a result is cached as the CI provider for the repo
+  // so future PRs skip straight to the known source instead of running all three.
+  async getCIStatus(repo, pr) {
+    const prNumber = pr.number;
+
+    // Resolve head SHA — available directly on most PR list responses.
+    let headSha = pr.head?.sha;
+    if (!headSha) {
+      const prDetail = await this.getPRDetail(repo, prNumber);
+      headSha = prDetail?.head?.sha;
+    }
+
+    const knownProvider = await this.getCachedCIProvider(repo);
+
+    // Fast path when we already know the CI provider for this repo.
+    if (knownProvider === 'github-actions' || knownProvider === 'github-status') {
+      return this._getCIStatusViaSHA(repo, prNumber, headSha);
+    }
+    if (knownProvider === 'flinkbot') {
+      // Try flinkbot first; fall back to SHA-based if the PR has no flinkbot comment.
+      const ciStatus = await this._getCIStatusViaFlinkbot(repo, prNumber);
+      if (ciStatus) return ciStatus;
+      return headSha ? this._getCIStatusViaSHA(repo, prNumber, headSha) : null;
+    }
+
+    // Full waterfall when provider is unknown.
+    if (headSha) {
+      // 1. Check Runs (GitHub Actions)
+      const checkRuns = await this.getCheckRuns(repo, headSha);
+      if (checkRuns && checkRuns.length > 0) {
+        const ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
+        if (ciStatus) {
+          await this.setCachedCIProvider(repo, 'github-actions');
+          return ciStatus;
+        }
+      }
+
+      // 2. Commit Status
+      const statuses = await this.getCommitStatuses(repo, headSha);
+      if (statuses && statuses.length > 0) {
+        const ciStatus = CIParser.parseCommitStatus(statuses);
+        if (ciStatus) {
+          await this.setCachedCIProvider(repo, 'github-status');
+          return ciStatus;
+        }
+      }
+    }
+
+    // 3. flinkbot comments (Azure CI) — works without a SHA
+    const ciStatus = await this._getCIStatusViaFlinkbot(repo, prNumber);
+    if (ciStatus) {
+      await this.setCachedCIProvider(repo, 'flinkbot');
+      return ciStatus;
+    }
+
+    return null;
+  }
+
+  // Internal helper: resolve CI via GitHub Actions / Commit Status using head SHA.
+  async _getCIStatusViaSHA(repo, prNumber, headSha) {
+    if (!headSha) return null;
+
+    const checkRuns = await this.getCheckRuns(repo, headSha);
+    if (checkRuns && checkRuns.length > 0) {
+      const ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
+      if (ciStatus) return ciStatus;
+    }
+
+    const statuses = await this.getCommitStatuses(repo, headSha);
+    if (statuses && statuses.length > 0) {
+      return CIParser.parseCommitStatus(statuses);
+    }
+
+    return null;
+  }
+
+  // Internal helper: resolve CI via flinkbot PR comments.
+  async _getCIStatusViaFlinkbot(repo, prNumber) {
+    const comments = await this.getPRComments(repo, prNumber);
+    return CIParser.extractCIStatusFromComments(comments);
+  }
+
   async fetchGraphQL(query, variables) {
     if (!this._token) return null;
     const resp = await fetch('https://api.github.com/graphql', {
@@ -336,9 +466,6 @@ class GitHubAPI {
   }
 
   async batchGetCIStatus(repo, prs, onResult) {
-    // Determine project type: apache/flink uses Azure CI, others use GitHub Actions
-    const useAzureCI = repo === 'apache/flink';
-    
     const queue = [...prs];
     const workers = Array.from({ length: CONFIG.CONCURRENT }, async () => {
       while (queue.length > 0) {
@@ -347,37 +474,7 @@ class GitHubAPI {
         const prNumber = pr.number;
         
         try {
-          let ciStatus = null;
-          
-          if (useAzureCI) {
-            // Apache Flink main project: get Azure CI status from flinkbot comments
-            const comments = await this.getPRComments(repo, prNumber);
-            ciStatus = CIParser.extractCIStatusFromComments(comments);
-          } else {
-            // Connector projects: get CI status from GitHub Check Runs
-            let headSha = pr.head?.sha;
-            if (!headSha) {
-              const prDetail = await this.getPRDetail(repo, prNumber);
-              headSha = prDetail?.head?.sha;
-            }
-            
-            if (headSha) {
-              // Try Check Runs (GitHub Actions) first
-              const checkRuns = await this.getCheckRuns(repo, headSha);
-              if (checkRuns && checkRuns.length > 0) {
-                ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
-              }
-              
-              // Fallback to Commit Status
-              if (!ciStatus) {
-                const statuses = await this.getCommitStatuses(repo, headSha);
-                if (statuses && statuses.length > 0) {
-                  ciStatus = CIParser.parseCommitStatus(statuses);
-                }
-              }
-            }
-          }
-          
+          const ciStatus = await this.getCIStatus(repo, pr);
           onResult(prNumber, ciStatus);
         } catch (err) {
           console.warn(`Failed to get CI for PR #${prNumber}:`, err.message);
