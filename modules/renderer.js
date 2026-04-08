@@ -31,6 +31,12 @@ class Renderer {
       const stateLabel = state.charAt(0).toUpperCase() + state.slice(1);
       const dateField = state === 'merged' ? pr.merged_at : (state === 'closed' ? pr.closed_at : pr.created_at);
       const timeLabel = state === 'merged' ? 'Merged' : (state === 'closed' ? 'Closed' : 'Opened');
+      // In aggregate mode each PR carries _repo; derive a short name for the badge
+      const repoBadge = pr._repo
+        ? `<span class="pr-repo-badge">${escapeHtml(pr._repo.split('/').pop())}</span>`
+        : '';
+      // Use a composite DOM id when multiple repos may have the same PR number
+      const ciId = pr._ciId || String(pr.number);
 
       return `
         <div class="pr-item">
@@ -40,7 +46,7 @@ class Renderer {
               <span class="pr-state-badge ${escapeHtml(state)}">${escapeHtml(stateLabel)}</span>
             </div>
             <div class="pr-right">
-              <div class="pr-title-row">${renderPRTitle(pr.title, pr.html_url)}</div>
+              <div class="pr-title-row">${repoBadge}${renderPRTitle(pr.title, pr.html_url)}</div>
             </div>
           </div>
           <div class="pr-row-bottom">
@@ -56,13 +62,13 @@ class Renderer {
               <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
               ${pr.comments || 0}
             </span>
-            <span id="ci-${pr.number}" class="ci-loading">loading CI…</span>
+            <span id="ci-${ciId}" class="ci-loading">loading CI…</span>
             <button class="expert-suggestion-btn" 
                     data-pr-number="${pr.number}"
                     title="Suggest experts for this PR">
               <svg viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                <path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/>
+                <path d="M7.5 5.5A.5.5 0 0 1 8 5h1.5a.5.5 0 0 1 .5.5V8a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5v-3zm2 0a.5.5 0 0 1 1 0v3a.5.5 0 0 1-1 0v-3z"/>
                 <path d="M8 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
               </svg>
             </button>
@@ -99,8 +105,9 @@ class Renderer {
     `;
   }
 
-  updateCIStatus(prNumber, ciStatus) {
-    const el = document.getElementById(`ci-${prNumber}`);
+  // ciId is either a plain PR number (single-repo) or a composite "repo_prNum" string (aggregate)
+  updateCIStatus(ciId, ciStatus) {
+    const el = document.getElementById(`ci-${ciId}`);
     if (!el) return;
 
     if (!ciStatus) {
@@ -113,9 +120,9 @@ class Renderer {
     const safeUrl = escapeHtml(ciStatus.url);
 
     if (ciStatus.url) {
-      el.outerHTML = `<a id="ci-${prNumber}" class="ci-badge ${escapeHtml(ciStatus.cssClass)} clickable"
+      el.outerHTML = `<a id="ci-${ciId}" class="ci-badge ${escapeHtml(ciStatus.cssClass)} clickable"
         href="${safeUrl}" target="_blank" rel="noopener noreferrer"
-        title="Azure CI: ${escapeHtml(ciStatus.status)}">${safeLabel}</a>`;
+        title="CI: ${escapeHtml(ciStatus.status)}">${safeLabel}</a>`;
     } else {
       el.className = `ci-badge ${ciStatus.cssClass}`;
       el.textContent = ciStatus.label;

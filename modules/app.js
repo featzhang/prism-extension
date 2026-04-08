@@ -194,6 +194,12 @@ class PRismApp {
     
     // Clear and populate dropdown
     repoSelect.innerHTML = '';
+
+    // Prepend the aggregate "All Repos" entry
+    const allOption = document.createElement('option');
+    allOption.value = CONFIG.ALL_REPOS_VALUE;
+    allOption.textContent = '★ All Repos';
+    repoSelect.appendChild(allOption);
     
     // Combine preset and custom repositories
     const allRepos = this.getAllRepos();
@@ -206,7 +212,7 @@ class PRismApp {
     });
     
     // Check if current repo is in list
-    const isInList = allRepos.some(r => r.value === this.repo);
+    const isInList = this.repo === CONFIG.ALL_REPOS_VALUE || allRepos.some(r => r.value === this.repo);
     if (!isInList && this.repo) {
       // Add temporary option if not in list
       const customOption = document.createElement('option');
@@ -218,6 +224,9 @@ class PRismApp {
     // Set current selected value
     repoSelect.value = this.repo;
   }
+
+  // True when the user has selected the aggregate "All Repos" view
+  get _isAggregateMode() { return this.repo === CONFIG.ALL_REPOS_VALUE; }
 
   getAllRepos() {
     // Combine preset and custom repositories, avoid duplicates
@@ -1213,6 +1222,12 @@ class PRismApp {
   }
 
   async loadStats() {
+    // In aggregate mode the per-repo dashboard stats aren't meaningful —
+    // the summary bar (loadAllReposStats) already covers the totals.
+    if (this._isAggregateMode) {
+      this.renderer.renderStats({ open: '—', closed: '—', merged: '—' });
+      return;
+    }
     try {
       const stats = await this.github.getStats(this.repo, this.currentAuthor);
       this.renderer.renderStats(stats);
@@ -1236,6 +1251,7 @@ class PRismApp {
       this.renderer.showStatus('Offline — showing cached data.');
       return;
     }
+    if (this._isAggregateMode) return this.loadAggregatedPRs();
     if (this.isLoading && this._prLoadInProgress) return;
     this._prLoadInProgress = true;
     this.setLoading(true);
@@ -1268,7 +1284,7 @@ class PRismApp {
 
         // Use generic CI status fetching (auto-detect Azure CI or GitHub Actions)
         this.github.batchGetCIStatus(this.repo, prs, (prNumber, ciStatus) => {
-          this.renderer.updateCIStatus(prNumber, ciStatus);
+          this.renderer.updateCIStatus(String(prNumber), ciStatus);
           this.applyCIFilter();
         });
 
@@ -1311,6 +1327,82 @@ class PRismApp {
       this._prLoadInProgress = false;
       this.setLoading(false);
     }
+  }
+
+  // Fetch PRs from ALL repos in parallel, merge + sort into one pool, paginate locally.
+  async loadAggregatedPRs() {
+    if (this.isLoading && this._prLoadInProgress) return;
+    this._prLoadInProgress = true;
+    this.setLoading(true);
+    this.renderer.renderLoading();
+    this.renderer.hideStatus();
+
+    try {
+      const userPerPage = await this.storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
+      const repos = this.getAllRepos(); // excludes ALL_REPOS_VALUE sentinel
+
+      // Fetch page 1 from every repo concurrently; tag each PR with its source repo
+      const settled = await Promise.allSettled(
+        repos.map(r =>
+          this.github.getPRList(r.value, {
+            state: this.currentState,
+            page: 1,
+            sort: this.currentSort,
+            direction: this.currentDirection,
+            author: this.currentAuthor,
+            perPage: userPerPage,
+          }).then(prs => prs.map(pr => ({
+            ...pr,
+            _repo: r.value,
+            // Composite DOM id — safe across repos with the same PR number
+            _ciId: r.value.replace(/\//g, '_') + '_' + pr.number,
+          })))
+        )
+      );
+
+      let allPRs = [];
+      settled.forEach(r => { if (r.status === 'fulfilled') allPRs.push(...r.value); });
+
+      // Sort merged pool by the current sort field
+      allPRs = this._sortPRs(allPRs, this.currentSort, this.currentDirection);
+
+      this.currentTotalCount = allPRs.length;
+      const start = (this.currentPage - 1) * userPerPage;
+      const pagePRs = allPRs.slice(start, start + userPerPage);
+      const hasMore = start + userPerPage < allPRs.length;
+
+      this.currentPRs = pagePRs;
+      this.renderer.renderPRList(pagePRs);
+      await this.renderer.renderPagination(this.currentPage, hasMore, allPRs.length);
+
+      // Async CI statuses — use composite ciId to avoid DOM id collisions
+      pagePRs.forEach(pr => {
+        this.github.getCIStatus(pr._repo, pr).then(ciStatus => {
+          this.renderer.updateCIStatus(pr._ciId, ciStatus);
+          this.applyCIFilter();
+        }).catch(() => {});
+      });
+
+    } catch (err) {
+      console.error('Failed to load aggregated PRs:', err);
+      const classified = this._classifyError(err);
+      this.renderer.showStatus(`${classified.message} ${classified.hint}`, true);
+      this.renderer.renderError(`${classified.message}\n\n${classified.hint}`);
+      const retryBtn = document.getElementById('retry-load');
+      if (retryBtn) retryBtn.addEventListener('click', () => this.loadPRs());
+    } finally {
+      this._prLoadInProgress = false;
+      this.setLoading(false);
+    }
+  }
+
+  // Sort a PR array by 'created' or 'updated' field in given direction.
+  _sortPRs(prs, sort, direction) {
+    const field = sort === 'updated' ? 'updated_at' : 'created_at';
+    return [...prs].sort((a, b) => {
+      const diff = new Date(a[field]) - new Date(b[field]);
+      return direction === 'asc' ? diff : -diff;
+    });
   }
 
   // Classify an error into a user-facing category and return a structured object:

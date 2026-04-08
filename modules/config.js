@@ -9,6 +9,7 @@ const CONFIG = {
   TTL_EXPERTS: 24 * 60 * 60 * 1000, // 24 hours - expert recommendations rarely change
   TTL_CONTRIBUTORS: 12 * 60 * 60 * 1000, // 12 hours - file contributors rarely change
   DEFAULT_REPO: 'apache/flink',
+  ALL_REPOS_VALUE: '__all__', // sentinel value for the aggregate "All Repos" view
   GITHUB_API: 'https://api.github.com',
   
   // Preset repository list
