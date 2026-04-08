@@ -804,18 +804,33 @@ class PRismApp {
     try {
       this.showExpertPanel();
       const expertList = document.getElementById('expert-list');
-      expertList.innerHTML = '<div class="loading"><div class="spinner"></div><span>Analyzing PRs for expert recommendations...</span></div>';
 
       const prNumbers = this.currentPRs.map(pr => pr.number);
+      const total = prNumbers.length;
+      let done = 0;
+
+      // Render progress header + empty results body
+      expertList.innerHTML = `
+        <div id="expert-progress" class="expert-progress">
+          <div class="expert-progress-bar">
+            <div class="expert-progress-fill" style="width:0%"></div>
+          </div>
+          <span class="expert-progress-label">Analyzing… 0 / ${total}</span>
+        </div>
+        <div id="expert-results-body"></div>
+      `;
+
       const expertResults = {};
 
       await this.expertRecommender.batchSuggestExperts(this.repo, prNumbers, (prNumber, experts, meta) => {
+        done++;
         if (meta && meta.skipped) {
           // Show a specific skipped indicator rather than an empty result
           expertResults[prNumber] = { skipped: true, reason: meta.reason };
         } else {
           expertResults[prNumber] = experts;
         }
+        this._updateExpertProgress(done, total);
         this.updateExpertPanel(expertResults);
       });
 
@@ -930,9 +945,30 @@ class PRismApp {
     this.bindCopyReviewersEvents();
   }
 
-  // Update expert panel
+  // Update the progress bar/counter during batch expert analysis.
+  _updateExpertProgress(done, total) {
+    const el = document.getElementById('expert-progress');
+    if (!el) return;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (done >= total) {
+      el.className = 'expert-progress expert-progress-done';
+      el.innerHTML = `<span class="expert-progress-label">✓ Done — ${done} / ${total} PR${total !== 1 ? 's' : ''} analyzed</span>`;
+    } else {
+      el.innerHTML = `
+        <div class="expert-progress-bar">
+          <div class="expert-progress-fill" style="width:${pct}%"></div>
+        </div>
+        <span class="expert-progress-label">Analyzing… ${done} / ${total}</span>
+      `;
+    }
+  }
+
   updateExpertPanel(expertResults) {
-    const expertList = document.getElementById('expert-list');
+    // During batch analysis results render into #expert-results-body (so the
+    // progress header above it is not wiped). For the single-PR path and error
+    // states the element falls back to #expert-list.
+    const expertList = document.getElementById('expert-results-body')
+                    || document.getElementById('expert-list');
     
     if (Object.keys(expertResults).length === 0) {
       expertList.innerHTML = '<div class="empty-state">No expert recommendations available</div>';

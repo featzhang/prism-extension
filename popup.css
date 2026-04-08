@@ -928,6 +928,40 @@ body {
   overflow: hidden;
 }
 
+/* ===== Expert Progress Bar ===== */
+.expert-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.expert-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.expert-progress-fill {
+  height: 100%;
+  background: var(--color-total);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.expert-progress-done {
+  color: var(--color-success, #1a7f37);
+}
+
+.expert-progress-label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .expert-header {
   display: flex;
   align-items: center;
