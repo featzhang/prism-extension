@@ -5,7 +5,7 @@ A Chrome side panel extension for open source contributors to monitor Apache Fli
 ![Chrome](https://img.shields.io/badge/Chrome-114+-blue?logo=googlechrome)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
-![Version](https://img.shields.io/badge/Version-1.1.0-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.0.3-brightgreen)
 
 ## Features
 
