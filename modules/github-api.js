@@ -284,10 +284,12 @@ class GitHubAPI {
     return pr;
   }
 
-  async getCheckRuns(repo, ref) {
+  async getCheckRuns(repo, ref, { bypassCache = false } = {}) {
     const cacheKey = `cache_checks_${repo}_${ref}`;
-    const cached = await this.storage.getCache(cacheKey);
-    if (cached) return cached;
+    if (!bypassCache) {
+      const cached = await this.storage.getCache(cacheKey);
+      if (cached) return cached;
+    }
 
     const url = `${CONFIG.GITHUB_API}/repos/${repo}/commits/${ref}/check-runs?per_page=100`;
     const result = await this.fetch(url);
@@ -296,10 +298,12 @@ class GitHubAPI {
     return result.check_runs || [];
   }
 
-  async getCommitStatuses(repo, ref) {
+  async getCommitStatuses(repo, ref, { bypassCache = false } = {}) {
     const cacheKey = `cache_statuses_${repo}_${ref}`;
-    const cached = await this.storage.getCache(cacheKey);
-    if (cached) return cached;
+    if (!bypassCache) {
+      const cached = await this.storage.getCache(cacheKey);
+      if (cached) return cached;
+    }
 
     const url = `${CONFIG.GITHUB_API}/repos/${repo}/commits/${ref}/statuses?per_page=100`;
     const statuses = await this.fetch(url);
@@ -327,7 +331,7 @@ class GitHubAPI {
   //
   // The first source that returns a result is cached as the CI provider for the repo
   // so future PRs skip straight to the known source instead of running all three.
-  async getCIStatus(repo, pr) {
+  async getCIStatus(repo, pr, { bypassCache = false } = {}) {
     const prNumber = pr.number;
 
     // Resolve head SHA — available directly on most PR list responses.
@@ -341,19 +345,19 @@ class GitHubAPI {
 
     // Fast path when we already know the CI provider for this repo.
     if (knownProvider === 'github-actions' || knownProvider === 'github-status') {
-      return this._getCIStatusViaSHA(repo, prNumber, headSha);
+      return this._getCIStatusViaSHA(repo, prNumber, headSha, { bypassCache });
     }
     if (knownProvider === 'flinkbot') {
       // Try flinkbot first; fall back to SHA-based if the PR has no flinkbot comment.
       const ciStatus = await this._getCIStatusViaFlinkbot(repo, prNumber);
       if (ciStatus) return ciStatus;
-      return headSha ? this._getCIStatusViaSHA(repo, prNumber, headSha) : null;
+      return headSha ? this._getCIStatusViaSHA(repo, prNumber, headSha, { bypassCache }) : null;
     }
 
     // Full waterfall when provider is unknown.
     if (headSha) {
       // 1. Check Runs (GitHub Actions)
-      const checkRuns = await this.getCheckRuns(repo, headSha);
+      const checkRuns = await this.getCheckRuns(repo, headSha, { bypassCache });
       if (checkRuns && checkRuns.length > 0) {
         const ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
         if (ciStatus) {
@@ -363,7 +367,7 @@ class GitHubAPI {
       }
 
       // 2. Commit Status
-      const statuses = await this.getCommitStatuses(repo, headSha);
+      const statuses = await this.getCommitStatuses(repo, headSha, { bypassCache });
       if (statuses && statuses.length > 0) {
         const ciStatus = CIParser.parseCommitStatus(statuses);
         if (ciStatus) {
@@ -384,16 +388,16 @@ class GitHubAPI {
   }
 
   // Internal helper: resolve CI via GitHub Actions / Commit Status using head SHA.
-  async _getCIStatusViaSHA(repo, prNumber, headSha) {
+  async _getCIStatusViaSHA(repo, prNumber, headSha, { bypassCache = false } = {}) {
     if (!headSha) return null;
 
-    const checkRuns = await this.getCheckRuns(repo, headSha);
+    const checkRuns = await this.getCheckRuns(repo, headSha, { bypassCache });
     if (checkRuns && checkRuns.length > 0) {
       const ciStatus = CIParser.parseCheckRunsStatus(checkRuns);
       if (ciStatus) return ciStatus;
     }
 
-    const statuses = await this.getCommitStatuses(repo, headSha);
+    const statuses = await this.getCommitStatuses(repo, headSha, { bypassCache });
     if (statuses && statuses.length > 0) {
       return CIParser.parseCommitStatus(statuses);
     }

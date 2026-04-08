@@ -32,6 +32,9 @@ class PRismApp {
 
     // Offline detection — initialise from current browser state
     this._isOffline = !navigator.onLine;
+
+    // CI polling timer — tracks in-progress PRs and refreshes their status
+    this._ciPollTimer = null;
   }
 
   // Returns a function that delays invoking fn until after `wait` ms have elapsed
@@ -1247,6 +1250,7 @@ class PRismApp {
   }
 
   async loadPRs() {
+    this._stopCIPolling();
     if (this._isOffline) {
       this.renderer.showStatus('Offline — showing cached data.');
       return;
@@ -1287,6 +1291,7 @@ class PRismApp {
           this.renderer.updateCIStatus(String(prNumber), ciStatus);
           this.applyCIFilter();
         });
+        this._startCIPolling(prs);
 
         if (this.github._token) {
           let totalCR = 0;
@@ -1331,6 +1336,7 @@ class PRismApp {
 
   // Fetch PRs from ALL repos in parallel, merge + sort into one pool, paginate locally.
   async loadAggregatedPRs() {
+    this._stopCIPolling();
     if (this.isLoading && this._prLoadInProgress) return;
     this._prLoadInProgress = true;
     this.setLoading(true);
@@ -1382,6 +1388,7 @@ class PRismApp {
           this.applyCIFilter();
         }).catch(() => {});
       });
+      this._startCIPolling(pagePRs);
 
     } catch (err) {
       console.error('Failed to load aggregated PRs:', err);
@@ -1403,6 +1410,50 @@ class PRismApp {
       const diff = new Date(a[field]) - new Date(b[field]);
       return direction === 'asc' ? diff : -diff;
     });
+  }
+
+  // Start polling CI status for in-progress PRs every 60 seconds.
+  // Automatically stops when no ci-pending badges remain on the current page.
+  _startCIPolling(prs) {
+    this._stopCIPolling();
+    if (!prs || prs.length === 0) return;
+
+    this._ciPollTimer = setInterval(async () => {
+      if (this._isOffline) return;
+
+      // Find PRs still showing ci-pending badge in the DOM
+      const pendingPRs = prs.filter(pr => {
+        const ciId = pr._ciId || String(pr.number);
+        const el = document.getElementById(`ci-${ciId}`);
+        return el && el.classList.contains('ci-pending');
+      });
+
+      if (pendingPRs.length === 0) {
+        this._stopCIPolling();
+        return;
+      }
+
+      // Re-fetch CI for each pending PR, bypassing the 5-min cache
+      await Promise.allSettled(
+        pendingPRs.map(pr => {
+          const repo = pr._repo || this.repo;
+          const ciId = pr._ciId || String(pr.number);
+          return this.github.getCIStatus(repo, pr, { bypassCache: true })
+            .then(ciStatus => {
+              this.renderer.updateCIStatus(ciId, ciStatus);
+              this.applyCIFilter();
+            })
+            .catch(() => {});
+        })
+      );
+    }, 60_000);
+  }
+
+  _stopCIPolling() {
+    if (this._ciPollTimer) {
+      clearInterval(this._ciPollTimer);
+      this._ciPollTimer = null;
+    }
   }
 
   // Classify an error into a user-facing category and return a structured object:
