@@ -29,6 +29,9 @@ class PRismApp {
 
     // Debounced loadPRs — prevents redundant API calls when filters change rapidly
     this._debouncedLoadPRs = this._debounce(() => this.loadPRs(), 200);
+
+    // Offline detection — initialise from current browser state
+    this._isOffline = !navigator.onLine;
   }
 
   // Returns a function that delays invoking fn until after `wait` ms have elapsed
@@ -65,6 +68,9 @@ class PRismApp {
     
     // Set up event listeners
     this.setupEventListeners();
+
+    // Show offline banner immediately if the extension opened without connectivity
+    if (this._isOffline) this._handleOffline();
     
     console.log('PRism extension initialized successfully');
   }
@@ -328,6 +334,32 @@ class PRismApp {
         }
       }
     });
+
+    // Offline / online detection
+    window.addEventListener('offline', () => this._handleOffline());
+    window.addEventListener('online',  () => this._handleOnline());
+  }
+
+  _handleOffline() {
+    this._isOffline = true;
+    const bar = document.getElementById('status-bar');
+    bar.textContent = 'You are offline — cached data shown, live updates paused.';
+    bar.className = 'status-bar offline';
+    document.getElementById('btn-refresh')?.setAttribute('disabled', '');
+    document.getElementById('btn-refresh-stats')?.setAttribute('disabled', '');
+  }
+
+  _handleOnline() {
+    this._isOffline = false;
+    // Only clear the banner if it is the offline banner — don't clobber unrelated messages
+    const bar = document.getElementById('status-bar');
+    if (bar.classList.contains('offline')) {
+      bar.className = 'status-bar hidden';
+    }
+    document.getElementById('btn-refresh')?.removeAttribute('disabled');
+    document.getElementById('btn-refresh-stats')?.removeAttribute('disabled');
+    // Reload fresh data now that connectivity is restored
+    this.loadAll();
   }
 
   // Show expert panel
@@ -1164,6 +1196,10 @@ class PRismApp {
   }
 
   async loadPRs() {
+    if (this._isOffline) {
+      this.renderer.showStatus('Offline — showing cached data.');
+      return;
+    }
     if (this.isLoading && this._prLoadInProgress) return;
     this._prLoadInProgress = true;
     this.setLoading(true);

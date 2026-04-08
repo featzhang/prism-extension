@@ -365,6 +365,12 @@ body {
   color: #82071e;
 }
 
+.status-bar.offline {
+  background: #ddf4ff;
+  border-color: #54aeff66;
+  color: #0550ae;
+}
+
 .status-bar.hidden {
   display: none;
 }
