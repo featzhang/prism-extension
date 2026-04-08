@@ -1212,12 +1212,16 @@ class PRismApp {
   }
 
   async loadAll() {
-    // Load stats and PRs in parallel
+    // Load stats and PRs in parallel; pass skipLoadingState=true so that
+    // loadPRs/loadAggregatedPRs don't redundantly toggle loading themselves,
+    // which would cause the loading animation and PR list to flicker.
     this.setLoading(true);
+    this.renderer.renderLoading();
+    this.renderer.hideStatus();
     try {
       await Promise.all([
         this.loadStats(),
-        this.loadPRs(),
+        this.loadPRs(true),
       ]);
     } finally {
       this.setLoading(false);
@@ -1249,18 +1253,20 @@ class PRismApp {
     }
   }
 
-  async loadPRs() {
+  async loadPRs(skipLoadingState = false) {
     this._stopCIPolling();
     if (this._isOffline) {
       this.renderer.showStatus('Offline — showing cached data.');
       return;
     }
-    if (this._isAggregateMode) return this.loadAggregatedPRs();
+    if (this._isAggregateMode) return this.loadAggregatedPRs(skipLoadingState);
     if (this.isLoading && this._prLoadInProgress) return;
     this._prLoadInProgress = true;
-    this.setLoading(true);
-    this.renderer.renderLoading();
-    this.renderer.hideStatus();
+    if (!skipLoadingState) {
+      this.setLoading(true);
+      this.renderer.renderLoading();
+      this.renderer.hideStatus();
+    }
     // CI filter is preserved across loads — do not reset it here.
 
     try {
@@ -1330,18 +1336,20 @@ class PRismApp {
       }
     } finally {
       this._prLoadInProgress = false;
-      this.setLoading(false);
+      if (!skipLoadingState) this.setLoading(false);
     }
   }
 
   // Fetch PRs from ALL repos in parallel, merge + sort into one pool, paginate locally.
-  async loadAggregatedPRs() {
+  async loadAggregatedPRs(skipLoadingState = false) {
     this._stopCIPolling();
     if (this.isLoading && this._prLoadInProgress) return;
     this._prLoadInProgress = true;
-    this.setLoading(true);
-    this.renderer.renderLoading();
-    this.renderer.hideStatus();
+    if (!skipLoadingState) {
+      this.setLoading(true);
+      this.renderer.renderLoading();
+      this.renderer.hideStatus();
+    }
 
     try {
       const userPerPage = await this.storage.getUserConfig('perPage', CONFIG.DEFAULT_PER_PAGE);
@@ -1399,7 +1407,7 @@ class PRismApp {
       if (retryBtn) retryBtn.addEventListener('click', () => this.loadPRs());
     } finally {
       this._prLoadInProgress = false;
-      this.setLoading(false);
+      if (!skipLoadingState) this.setLoading(false);
     }
   }
 
