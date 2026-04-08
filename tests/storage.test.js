@@ -321,3 +321,104 @@ describe('StorageManager — clearAuth', () => {
     expect(chromeMock._store['userConfig']).toEqual({ filterState: 'open' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// IDBCache.delete (direct)
+// ---------------------------------------------------------------------------
+describe('IDBCache — delete', () => {
+  let sm;
+  beforeEach(() => { sm = makeStorageManager(); });
+
+  it('deletes an existing IDB entry so getCache returns null', async () => {
+    await sm.setCache('cache_experts_del_test', { x: 1 }, 86_400_000);
+    // Confirm it's there
+    await expect(sm.getCache('cache_experts_del_test')).resolves.toEqual({ x: 1 });
+    // Delete via IDBCache directly
+    await sm._idb.delete('cache_experts_del_test');
+    await expect(sm.getCache('cache_experts_del_test')).resolves.toBeNull();
+  });
+
+  it('delete on non-existent key resolves without error', async () => {
+    await expect(sm._idb.delete('cache_experts_nonexistent')).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IDB error fallback — getCache falls back to chrome.storage on IDB failure
+// ---------------------------------------------------------------------------
+describe('StorageManager — IDB error fallback (getCache)', () => {
+  let sm;
+  let warnSpy;
+
+  beforeEach(() => {
+    sm = makeStorageManager();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('falls back to chrome.storage when IDB.get throws', async () => {
+    vi.spyOn(sm._idb, 'get').mockRejectedValue(new Error('IDB unavailable'));
+
+    // Pre-populate chrome.storage with a valid entry for this IDB-prefix key
+    const key = 'cache_experts_fallback';
+    chromeMock._store[key] = { data: { fallback: true }, timestamp: Date.now(), ttl: 60_000 };
+
+    const val = await sm.getCache(key);
+    expect(val).toEqual({ fallback: true });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[IDBCache] get failed'),
+      expect.any(Error)
+    );
+  });
+
+  it('returns null from chrome.storage fallback when key is also absent there', async () => {
+    vi.spyOn(sm._idb, 'get').mockRejectedValue(new Error('IDB unavailable'));
+    await expect(sm.getCache('cache_experts_missing')).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IDB error fallback — setCache falls back to chrome.storage on IDB failure
+// ---------------------------------------------------------------------------
+describe('StorageManager — IDB error fallback (setCache)', () => {
+  let sm;
+  let warnSpy;
+
+  beforeEach(() => {
+    sm = makeStorageManager();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('falls back to chrome.storage when IDB.set throws', async () => {
+    vi.spyOn(sm._idb, 'set').mockRejectedValue(new Error('IDB write failed'));
+
+    const key = 'cache_contributors_fallback';
+    await sm.setCache(key, { score: 99 }, 43_200_000);
+
+    // Data should be in chrome.storage instead
+    expect(chromeMock._store[key]).toBeDefined();
+    expect(chromeMock._store[key].data).toEqual({ score: 99 });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[IDBCache] set failed'),
+      expect.any(Error)
+    );
+  });
+
+  it('written fallback data is retrievable via getCache (chrome.storage path)', async () => {
+    vi.spyOn(sm._idb, 'set').mockRejectedValue(new Error('IDB write failed'));
+    // Also make IDB.get fail so getCache uses chrome.storage path too
+    vi.spyOn(sm._idb, 'get').mockRejectedValue(new Error('IDB unavailable'));
+
+    const key = 'cache_experts_rw_fallback';
+    await sm.setCache(key, { data: 'chrome' }, 60_000);
+    const val = await sm.getCache(key);
+    expect(val).toEqual({ data: 'chrome' });
+  });
+});
