@@ -1,0 +1,16 @@
+{
+  "name": "prism-extension",
+  "version": "1.0.2",
+  "description": "PRism Chrome extension – unit tests",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.0.0",
+    "jsdom": "^29.0.2",
+    "vitest": "^2.0.0"
+  }
+}
